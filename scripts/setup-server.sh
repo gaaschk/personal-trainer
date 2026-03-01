@@ -6,10 +6,11 @@ set -e
 APP_DIR="$HOME/personal-trainer"
 REPO_URL="https://github.com/gaaschk/personal-trainer.git"
 NODE_VERSION="20"
+DB_PATH="$APP_DIR/trainer.db"
 
 echo "=== 1. System packages ==="
 sudo apt-get update -y
-sudo apt-get install -y git curl nginx postgresql postgresql-contrib
+sudo apt-get install -y git curl nginx
 
 echo "=== 2. Node.js $NODE_VERSION LTS ==="
 curl -fsSL https://deb.nodesource.com/setup_${NODE_VERSION}.x | sudo -E bash -
@@ -21,13 +22,7 @@ echo "=== 3. PM2 ==="
 sudo npm install -g pm2
 pm2 --version
 
-echo "=== 4. PostgreSQL setup ==="
-# Create DB user and database
-sudo -u postgres psql -c "CREATE USER trainer WITH PASSWORD 'changeme';" 2>/dev/null || true
-sudo -u postgres psql -c "CREATE DATABASE personal_trainer OWNER trainer;" 2>/dev/null || true
-sudo -u postgres psql -c "GRANT ALL PRIVILEGES ON DATABASE personal_trainer TO trainer;" 2>/dev/null || true
-
-echo "=== 5. Clone repository ==="
+echo "=== 4. Clone repository ==="
 if [ ! -d "$APP_DIR" ]; then
   git clone "$REPO_URL" "$APP_DIR"
 else
@@ -35,15 +30,15 @@ else
 fi
 
 echo ""
-echo "=== 6. Create .env file ==="
+echo "=== 5. Create .env file ==="
 if [ ! -f "$APP_DIR/.env" ]; then
-  cat > "$APP_DIR/.env" << 'EOF'
-# Database (update password to match what you set in step 4)
-DATABASE_URL="postgresql://trainer:changeme@localhost:5432/personal_trainer"
+  cat > "$APP_DIR/.env" << EOF
+# Database (SQLite)
+DATABASE_URL="file:$DB_PATH"
 
 # NextAuth — generate with: openssl rand -base64 32
 AUTH_SECRET=""
-AUTH_URL="http://YOUR_LIGHTSAIL_IP"
+AUTH_URL="http://$(curl -s ifconfig.me)"
 
 # Google OAuth (optional)
 GOOGLE_CLIENT_ID=""
@@ -59,15 +54,17 @@ ANTHROPIC_MODEL="claude-sonnet-4-6"
 EOF
   echo ""
   echo ">>> .env created at $APP_DIR/.env"
-  echo ">>> EDIT IT NOW before continuing: nano $APP_DIR/.env"
-  echo ">>> Press Enter when done..."
+  echo ">>> EDIT IT NOW before continuing:"
+  echo ">>>   nano $APP_DIR/.env"
+  echo ">>> At minimum set AUTH_SECRET and ANTHROPIC_API_KEY, then press Enter..."
   read -r
 else
   echo ".env already exists — skipping"
 fi
 
-echo "=== 7. Initial deploy ==="
+echo "=== 6. Initial deploy ==="
 cd "$APP_DIR"
+export NODE_ENV=production
 npm ci
 npx prisma migrate deploy
 npm run build
@@ -75,7 +72,7 @@ pm2 start npm --name trainer -- start
 pm2 save
 sudo env PATH="$PATH:/usr/bin" pm2 startup systemd -u ubuntu --hp "$HOME"
 
-echo "=== 8. Nginx reverse proxy ==="
+echo "=== 7. Nginx reverse proxy ==="
 sudo tee /etc/nginx/sites-available/trainer > /dev/null << 'NGINX'
 server {
     listen 80;
@@ -114,13 +111,17 @@ echo ""
 echo "================================================"
 echo " Setup complete!"
 echo " App running at: http://$(curl -s ifconfig.me)"
+echo " SQLite database: $DB_PATH"
 echo "================================================"
 echo ""
 echo "Next steps:"
-echo "  1. Add GitHub secrets (see repo → Settings → Secrets → Actions):"
+echo "  1. Add GitHub secrets (repo → Settings → Secrets → Actions):"
 echo "     LIGHTSAIL_HOST = $(curl -s ifconfig.me)"
 echo "     LIGHTSAIL_USER = ubuntu"
 echo "     LIGHTSAIL_SSH_KEY = <paste your private key>"
 echo ""
 echo "  2. Open port 80 in Lightsail firewall (Networking tab → Add rule → HTTP)."
 echo "  3. Push to main to trigger your first automated deploy."
+echo ""
+echo "  Backup the database:"
+echo "     cp $DB_PATH ~/trainer-backup-\$(date +%Y%m%d).db"

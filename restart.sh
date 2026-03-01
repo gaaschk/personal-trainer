@@ -2,6 +2,7 @@
 set -e
 
 export NODE_ENV=production
+export DATABASE_URL="file:/home/ubuntu/personal-trainer/trainer.db"
 
 echo "Pulling latest code..."
 git pull

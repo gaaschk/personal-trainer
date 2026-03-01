@@ -3,7 +3,7 @@ generator client {
 }
 
 datasource db {
-  provider = "postgresql"
+  provider = "sqlite"
   url      = env("DATABASE_URL")
 }
 
@@ -35,12 +35,12 @@ model Account {
   type              String
   provider          String
   providerAccountId String  @map("provider_account_id")
-  refresh_token     String? @db.Text
-  access_token      String? @db.Text
+  refresh_token     String?
+  access_token      String?
   expires_at        Int?
   token_type        String?
   scope             String?
-  id_token          String? @db.Text
+  id_token          String?
   session_state     String?
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
@@ -173,7 +173,7 @@ model TrainingPlan {
   status      PlanStatus  @default(ACTIVE)
   startDate   DateTime?   @map("start_date")
   endDate     DateTime?   @map("end_date")
-  rawJson     String?     @map("raw_json") @db.Text
+  rawJson     String?     @map("raw_json")
   createdAt   DateTime    @default(now()) @map("created_at")
   updatedAt   DateTime    @updatedAt @map("updated_at")
 
@@ -284,7 +284,7 @@ model ExerciseSet {
 model BodyMetric {
   id           String   @id @default(cuid())
   userId       String   @map("user_id")
-  date         DateTime @db.Date
+  date         DateTime
   weightKg     Float?   @map("weight_kg")
   bodyFatPct   Float?   @map("body_fat_pct")
   notes        String?
@@ -313,8 +313,8 @@ model Message {
   id             String      @id @default(cuid())
   conversationId String      @map("conversation_id")
   role           MessageRole
-  content        String      @db.Text
-  metadata       Json?
+  content        String
+  metadata       String?
   createdAt      DateTime    @default(now()) @map("created_at")
 
   conversation Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
