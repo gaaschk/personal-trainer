@@ -48,19 +48,22 @@ export async function POST(req: NextRequest) {
     const buffer = Buffer.from(await file.arrayBuffer());
 
     if (category === 'pdf') {
-      const { PDFParse } = await import('pdf-parse');
-      const parser = new PDFParse({ data: buffer });
-      const result = await parser.getText();
-      const raw = (result as { text?: string }).text ?? '';
-      const text = raw.trim();
+      // Use lib path to avoid pdf-parse v1's test-file auto-load in index.js
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      const pdfParse = require('pdf-parse/lib/pdf-parse.js') as (
+        buf: Buffer,
+      ) => Promise<{ text: string; numpages: number }>;
+      const data = await pdfParse(buffer);
+      const text = data.text.trim();
       const content = text.length > MAX_TEXT_CHARS
         ? text.slice(0, MAX_TEXT_CHARS) + '\n\n[… document truncated …]'
         : text;
 
       return NextResponse.json({
-        name:    file.name,
-        kind:    'pdf',
+        name:  file.name,
+        kind:  'pdf',
         content,
+        pages: data.numpages,
       });
     }
 
