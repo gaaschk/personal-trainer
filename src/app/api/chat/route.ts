@@ -29,8 +29,17 @@ export async function POST(req: NextRequest) {
   if (auth instanceof NextResponse) return auth;
   const { userId } = auth;
 
+  interface Attachment {
+    name: string;
+    kind: 'pdf' | 'text' | 'image';
+    content: string;     // text for pdf/text, base64 for image
+    mimeType?: string;   // for images
+    pages?: number;      // for pdfs
+  }
+
   const body = await req.json() as {
     messages: { role: 'user' | 'assistant'; content: string }[];
+    attachments?: Attachment[];
     conversationId?: string;
   };
 
@@ -52,10 +61,49 @@ export async function POST(req: NextRequest) {
         // Build system prompt fresh from DB
         const system = await buildSystemPrompt(userId);
 
+        // Build base message list
         const messages: Anthropic.MessageParam[] = body.messages.map((m) => ({
           role:    m.role,
           content: m.content,
         }));
+
+        // Inject attachments into the last user message
+        if (body.attachments?.length) {
+          const lastIdx = messages.length - 1;
+          const last = messages[lastIdx];
+          if (last.role === 'user') {
+            const imageAttachments  = body.attachments.filter((a) => a.kind === 'image');
+            const documentAttachments = body.attachments.filter((a) => a.kind !== 'image');
+
+            const contentBlocks: Anthropic.ContentBlockParam[] = [];
+
+            // Image blocks (vision)
+            for (const img of imageAttachments) {
+              contentBlocks.push({
+                type: 'image',
+                source: {
+                  type:       'base64',
+                  media_type: (img.mimeType ?? 'image/jpeg') as 'image/jpeg' | 'image/png' | 'image/gif' | 'image/webp',
+                  data:       img.content,
+                },
+              });
+            }
+
+            // Text blocks: prepend document content before the user's message
+            let userText = '';
+            for (const doc of documentAttachments) {
+              const label = doc.kind === 'pdf'
+                ? `[Attached PDF: "${doc.name}"${doc.pages ? ` — ${doc.pages} pages` : ''}]`
+                : `[Attached file: "${doc.name}"]`;
+              userText += `${label}\n\`\`\`\n${doc.content}\n\`\`\`\n\n`;
+            }
+            userText += last.content as string;
+
+            contentBlocks.push({ type: 'text', text: userText });
+
+            messages[lastIdx] = { role: 'user', content: contentBlocks };
+          }
+        }
 
         const MAX_ITERATIONS = 8;
         let iterations = 0;
