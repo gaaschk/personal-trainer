@@ -48,9 +48,11 @@ export async function POST(req: NextRequest) {
     const buffer = Buffer.from(await file.arrayBuffer());
 
     if (category === 'pdf') {
-      const { default: pdfParse } = await import('pdf-parse');
-      const data = await pdfParse(buffer);
-      const text = data.text.trim();
+      const { PDFParse } = await import('pdf-parse');
+      const parser = new PDFParse({ data: buffer });
+      const result = await parser.getText();
+      const raw = (result as { text?: string }).text ?? '';
+      const text = raw.trim();
       const content = text.length > MAX_TEXT_CHARS
         ? text.slice(0, MAX_TEXT_CHARS) + '\n\n[… document truncated …]'
         : text;
@@ -59,7 +61,6 @@ export async function POST(req: NextRequest) {
         name:    file.name,
         kind:    'pdf',
         content,
-        pages:   data.numpages,
       });
     }
 
