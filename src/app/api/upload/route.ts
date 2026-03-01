@@ -48,12 +48,7 @@ export async function POST(req: NextRequest) {
     const buffer = Buffer.from(await file.arrayBuffer());
 
     if (category === 'pdf') {
-      // Avoid Next.js / Turbopack test-file issue by importing from lib path
-      // eslint-disable-next-line @typescript-eslint/no-require-imports
-      const pdfParse = require('pdf-parse/lib/pdf-parse.js') as (
-        buf: Buffer,
-      ) => Promise<{ text: string; numpages: number }>;
-
+      const { default: pdfParse } = await import('pdf-parse');
       const data = await pdfParse(buffer);
       const text = data.text.trim();
       const content = text.length > MAX_TEXT_CHARS
