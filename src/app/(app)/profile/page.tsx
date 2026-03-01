@@ -15,6 +15,7 @@ interface FullProfile {
   heightCm: number | null;
   fitnessLevel: string;
   notes: string | null;
+  locationName: string | null;
   injuries: { id: string; description: string; tag: string; active: boolean }[];
   goals: {
     id: string; type: string; title: string;
@@ -37,7 +38,7 @@ export default function ProfilePage() {
     const data = await res.json() as FullProfile | null;
     setProfile(data ?? {
       id: '', age: null, weightKg: null, heightCm: null,
-      fitnessLevel: 'BEGINNER', notes: null,
+      fitnessLevel: 'BEGINNER', notes: null, locationName: null,
       injuries: [], goals: [], equipmentItems: [], gymMemberships: [],
     });
     setLoading(false);
@@ -48,6 +49,7 @@ export default function ProfilePage() {
   async function saveProfile(data: {
     age: number | null; weightKg: number | null;
     heightCm: number | null; fitnessLevel: string; notes: string | null;
+    locationName: string | null;
   }) {
     await fetch('/api/profile', {
       method: 'PUT',
@@ -82,6 +84,7 @@ export default function ProfilePage() {
                 heightCm:     profile!.heightCm,
                 fitnessLevel: profile!.fitnessLevel,
                 notes:        profile!.notes,
+                locationName: profile!.locationName,
               }}
               onSave={saveProfile}
             />

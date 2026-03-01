@@ -11,6 +11,7 @@ interface ProfileData {
   heightCm: number | null;
   fitnessLevel: string;
   notes: string | null;
+  locationName: string | null;
 }
 
 interface Props {
@@ -25,6 +26,7 @@ export default function ProfileForm({ initial, onSave }: Props) {
     heightCm:     initial.heightCm?.toString() ?? '',
     fitnessLevel: initial.fitnessLevel ?? 'BEGINNER',
     notes:        initial.notes ?? '',
+    locationName: initial.locationName ?? '',
   });
   const [saving, setSaving] = useState(false);
   const [saved, setSaved]   = useState(false);
@@ -43,6 +45,7 @@ export default function ProfileForm({ initial, onSave }: Props) {
         heightCm:     form.heightCm ? parseFloat(form.heightCm) : null,
         fitnessLevel: form.fitnessLevel,
         notes:        form.notes || null,
+        locationName: form.locationName || null,
       });
       setSaved(true);
       setTimeout(() => setSaved(false), 2000);
@@ -117,6 +120,29 @@ export default function ProfileForm({ initial, onSave }: Props) {
           <span className="text-gray-500 ml-2">({bmiCategory(bmi)})</span>
         </div>
       )}
+
+      <div className="flex flex-col gap-1">
+        <label htmlFor="locationName" className="text-sm font-medium text-gray-300">
+          Location
+        </label>
+        <div className="relative">
+          <div className="absolute inset-y-0 left-3 flex items-center pointer-events-none">
+            <svg className="w-4 h-4 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z" />
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 11a3 3 0 11-6 0 3 3 0 016 0z" />
+            </svg>
+          </div>
+          <input
+            id="locationName"
+            type="text"
+            className="w-full rounded-lg bg-gray-700 border border-gray-600 text-white placeholder-gray-400 pl-9 pr-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
+            placeholder="Denver, Colorado"
+            value={form.locationName}
+            onChange={(e) => setForm((f) => ({ ...f, locationName: e.target.value }))}
+          />
+        </div>
+        <p className="text-xs text-gray-500 mt-0.5">Used to check weather for outdoor workout planning</p>
+      </div>
 
       <div className="flex flex-col gap-1">
         <label htmlFor="notes" className="text-sm font-medium text-gray-300">

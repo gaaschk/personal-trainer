@@ -33,7 +33,28 @@ export async function PUT(req: NextRequest) {
     heightCm?: number;
     fitnessLevel?: string;
     notes?: string;
+    locationName?: string;
+    latitude?: number;
+    longitude?: number;
   };
+
+  // Geocode location if a name was provided without coordinates
+  let lat = body.latitude;
+  let lon = body.longitude;
+  let locationDisplay = body.locationName;
+  if (body.locationName && (lat === undefined || lon === undefined)) {
+    try {
+      const url = `https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(body.locationName)}&count=1&language=en&format=json`;
+      const geoRes  = await fetch(url);
+      const geoData = await geoRes.json() as { results?: { latitude: number; longitude: number; name: string; country: string; admin1?: string }[] };
+      const r = geoData.results?.[0];
+      if (r) {
+        lat = r.latitude;
+        lon = r.longitude;
+        locationDisplay = [r.name, r.admin1, r.country].filter(Boolean).join(', ');
+      }
+    } catch { /* ignore geocoding failure */ }
+  }
 
   const profile = await prisma.healthProfile.upsert({
     where: { userId },
@@ -43,6 +64,9 @@ export async function PUT(req: NextRequest) {
       heightCm:     body.heightCm ?? undefined,
       fitnessLevel: (body.fitnessLevel as 'BEGINNER' | 'INTERMEDIATE' | 'ADVANCED') ?? undefined,
       notes:        body.notes ?? undefined,
+      ...(locationDisplay !== undefined && { locationName: locationDisplay }),
+      ...(lat !== undefined && { latitude: lat }),
+      ...(lon !== undefined && { longitude: lon }),
     },
     create: {
       userId,
@@ -51,6 +75,9 @@ export async function PUT(req: NextRequest) {
       heightCm:     body.heightCm ?? null,
       fitnessLevel: (body.fitnessLevel as 'BEGINNER' | 'INTERMEDIATE' | 'ADVANCED') ?? 'BEGINNER',
       notes:        body.notes ?? null,
+      locationName: locationDisplay ?? null,
+      latitude:     lat ?? null,
+      longitude:    lon ?? null,
     },
   });
 

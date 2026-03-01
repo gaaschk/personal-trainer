@@ -11,6 +11,7 @@ import {
   handleScheduleWorkout,
   handleUpdateEquipment,
   handleGetProgress,
+  handleGetWeather,
   type TrainingPlanInput,
 } from '@/lib/ai/tool-handlers';
 import { prisma } from '@/lib/prisma';
@@ -145,6 +146,7 @@ export async function POST(req: NextRequest) {
                 schedule_workout:        'Scheduling workout…',
                 update_equipment:        'Updating equipment…',
                 get_progress:            'Fetching your progress data…',
+                get_weather:             'Checking the weather…',
               };
               controller.enqueue(encode({ t: 's', v: statusMap[tb.name] ?? `Running ${tb.name}…` }));
 
@@ -189,6 +191,10 @@ export async function POST(req: NextRequest) {
 
                   case 'get_progress':
                     result = await handleGetProgress(userId, input as { days?: number });
+                    break;
+
+                  case 'get_weather':
+                    result = await handleGetWeather(userId);
                     break;
 
                   default:

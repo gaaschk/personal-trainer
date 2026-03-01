@@ -14,6 +14,7 @@ export function buildTrainerTools(): Anthropic.Tool[] {
           fitnessLevel: { type: 'string',  enum: ['BEGINNER', 'INTERMEDIATE', 'ADVANCED'], description: 'Fitness level' },
           notes:        { type: 'string',  description: 'General notes about the client' },
           addInjury:    { type: 'string',  description: 'Description of a new injury or limitation to add' },
+          locationName: { type: 'string',  description: 'City/location name, e.g. "Denver, Colorado". Geocodes and stores coordinates.' },
         },
       },
     },
@@ -140,6 +141,14 @@ export function buildTrainerTools(): Anthropic.Tool[] {
             description: 'New gym membership to add',
           },
         },
+      },
+    },
+    {
+      name: 'get_weather',
+      description: 'Fetch current weather and 7-day forecast for the client\'s location. Call this when discussing outdoor workouts, adjusting plans for weather, or any weather-sensitive training decisions. Returns conditions, temperature, precipitation, and wind.',
+      input_schema: {
+        type: 'object' as const,
+        properties: {},
       },
     },
     {

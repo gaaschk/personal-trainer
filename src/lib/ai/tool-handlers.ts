@@ -18,6 +18,7 @@ export async function handleUpdateProfile(
     fitnessLevel?: string;
     notes?: string;
     addInjury?: string;
+    locationName?: string;
   },
 ) {
   const profile = await getOrCreateProfile(userId);
@@ -42,6 +43,17 @@ export async function handleUpdateProfile(
     });
   }
 
+  // Geocode and save location if provided
+  if (input.locationName) {
+    const geo = await geocodeLocation(input.locationName);
+    if (geo) {
+      await prisma.healthProfile.update({
+        where: { id: profile.id },
+        data: { locationName: geo.display, latitude: geo.lat, longitude: geo.lon },
+      });
+    }
+  }
+
   const fields: string[] = [];
   if (input.age)          fields.push(`age: ${input.age}`);
   if (input.weightKg)     fields.push(`weight: ${input.weightKg}kg`);
@@ -49,6 +61,7 @@ export async function handleUpdateProfile(
   if (input.fitnessLevel) fields.push(`fitness level: ${input.fitnessLevel.toLowerCase()}`);
   if (input.notes)        fields.push('notes updated');
   if (input.addInjury)    fields.push(`injury added: ${input.addInjury}`);
+  if (input.locationName) fields.push(`location: ${input.locationName}`);
 
   return { success: true, updated: fields };
 }
@@ -307,4 +320,111 @@ export async function handleGetProgress(userId: string, input: { days?: number }
       durationMin: s.durationMin,
     })),
   };
+}
+
+// ── Geocoding helper (Open-Meteo, free, no API key) ───────────────────────────
+async function geocodeLocation(
+  name: string,
+): Promise<{ lat: number; lon: number; display: string } | null> {
+  try {
+    const url = `https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(name)}&count=1&language=en&format=json`;
+    const res  = await fetch(url);
+    const data = await res.json() as { results?: { latitude: number; longitude: number; name: string; country: string; admin1?: string }[] };
+    const r    = data.results?.[0];
+    if (!r) return null;
+    const parts = [r.name, r.admin1, r.country].filter(Boolean);
+    return { lat: r.latitude, lon: r.longitude, display: parts.join(', ') };
+  } catch {
+    return null;
+  }
+}
+
+// ── WMO weather code → description ───────────────────────────────────────────
+function wmoDescription(code: number): string {
+  if (code === 0)               return 'Clear sky';
+  if (code <= 3)                return 'Partly cloudy';
+  if (code <= 48)               return 'Foggy';
+  if (code <= 55)               return 'Drizzle';
+  if (code <= 65)               return 'Rain';
+  if (code <= 75)               return 'Snow';
+  if (code <= 77)               return 'Snow grains';
+  if (code <= 82)               return 'Rain showers';
+  if (code <= 86)               return 'Snow showers';
+  if (code === 95)              return 'Thunderstorm';
+  return 'Thunderstorm with hail';
+}
+
+// ── get_weather ───────────────────────────────────────────────────────────────
+export async function handleGetWeather(userId: string) {
+  const profile = await prisma.healthProfile.findUnique({
+    where: { userId },
+    select: { locationName: true, latitude: true, longitude: true },
+  });
+
+  if (!profile?.latitude || !profile?.longitude) {
+    return {
+      error: 'No location set. Ask the client to set their location — either here in chat ("My location is Denver, Colorado") or on their profile page.',
+    };
+  }
+
+  try {
+    const { latitude: lat, longitude: lon, locationName } = profile;
+    const url = [
+      'https://api.open-meteo.com/v1/forecast',
+      `?latitude=${lat}&longitude=${lon}`,
+      '&current=temperature_2m,apparent_temperature,relative_humidity_2m,precipitation,weather_code,wind_speed_10m,wind_gusts_10m',
+      '&daily=weather_code,temperature_2m_max,temperature_2m_min,precipitation_sum,precipitation_probability_max,wind_speed_10m_max',
+      '&timezone=auto',
+      '&forecast_days=7',
+    ].join('');
+
+    const res  = await fetch(url);
+    const data = await res.json() as {
+      current: {
+        temperature_2m: number;
+        apparent_temperature: number;
+        relative_humidity_2m: number;
+        precipitation: number;
+        weather_code: number;
+        wind_speed_10m: number;
+        wind_gusts_10m: number;
+      };
+      daily: {
+        time: string[];
+        weather_code: number[];
+        temperature_2m_max: number[];
+        temperature_2m_min: number[];
+        precipitation_sum: number[];
+        precipitation_probability_max: number[];
+        wind_speed_10m_max: number[];
+      };
+    };
+
+    const c = data.current;
+    const d = data.daily;
+
+    return {
+      location: locationName ?? `${lat}, ${lon}`,
+      current: {
+        conditions:   wmoDescription(c.weather_code),
+        temperatureC: Math.round(c.temperature_2m),
+        feelsLikeC:   Math.round(c.apparent_temperature),
+        humidity:     c.relative_humidity_2m,
+        precipMm:     c.precipitation,
+        windKph:      Math.round(c.wind_speed_10m),
+        gustsKph:     Math.round(c.wind_gusts_10m),
+      },
+      forecast: d.time.map((date, i) => ({
+        date,
+        conditions:        wmoDescription(d.weather_code[i]),
+        highC:             Math.round(d.temperature_2m_max[i]),
+        lowC:              Math.round(d.temperature_2m_min[i]),
+        precipMm:          Math.round(d.precipitation_sum[i] * 10) / 10,
+        precipProbability: d.precipitation_probability_max[i],
+        maxWindKph:        Math.round(d.wind_speed_10m_max[i]),
+      })),
+    };
+  } catch (err) {
+    return { error: `Weather fetch failed: ${err instanceof Error ? err.message : 'unknown error'}` };
+  }
 }

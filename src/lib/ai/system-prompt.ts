@@ -50,12 +50,13 @@ export async function buildSystemPrompt(userId: string): Promise<string> {
   if (p) {
     const bmi = p.weightKg && p.heightCm ? calculateBMI(p.weightKg, p.heightCm) : null;
     profileSection += `Name: ${name}\n`;
-    if (p.age)      profileSection += `Age: ${p.age}\n`;
-    if (p.weightKg) profileSection += `Weight: ${p.weightKg} kg\n`;
-    if (p.heightCm) profileSection += `Height: ${p.heightCm} cm\n`;
-    if (bmi)        profileSection += `BMI: ${bmi}\n`;
+    if (p.age)          profileSection += `Age: ${p.age}\n`;
+    if (p.weightKg)     profileSection += `Weight: ${p.weightKg} kg\n`;
+    if (p.heightCm)     profileSection += `Height: ${p.heightCm} cm\n`;
+    if (bmi)            profileSection += `BMI: ${bmi}\n`;
     profileSection += `Fitness Level: ${p.fitnessLevel.toLowerCase()}\n`;
-    if (p.notes)    profileSection += `Notes: ${p.notes}\n`;
+    if (p.locationName) profileSection += `Location: ${p.locationName}\n`;
+    if (p.notes)        profileSection += `Notes: ${p.notes}\n`;
   } else {
     profileSection += `Name: ${name}\nProfile not yet set up.\n`;
   }
@@ -153,6 +154,8 @@ ${profileSection}${injuriesSection}${goalsSection}${equipmentSection}${planSecti
 - Format your responses as HTML — use <p>, <ul>, <li>, <strong>, <h3> with Tailwind classes
 - When presenting workout plans or schedules, use clear structured HTML tables or lists
 - Use tools to actually make changes (update profile, generate plans, log workouts) — never just describe changes
+- When discussing outdoor workouts, run/bike routes, or any weather-sensitive training, call get_weather first
+- If the client's location is not set and weather is relevant, ask for it and use update_profile to save it
 - Be warm, encouraging, and specific — like a real personal trainer who knows this client well
 - If you don't have enough information about the client's profile, ask before generating a plan`;
 }
