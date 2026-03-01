@@ -1,6 +1,8 @@
 #!/bin/bash
 set -e
 
+export NODE_ENV=production
+
 echo "Pulling latest code..."
 git pull
 
