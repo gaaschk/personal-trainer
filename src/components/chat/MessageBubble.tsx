@@ -23,6 +23,7 @@ interface WorkoutPlan {
 interface Message {
   role: 'user' | 'assistant';
   content: string;
+  displayContent?: string;
   statuses?: string[];
   card?: { type: 'workout_plan'; plan: WorkoutPlan } | null;
   attachments?: { name: string; kind: string }[];
@@ -48,7 +49,7 @@ export default function MessageBubble({ message }: { message: Message }) {
             </div>
           ))}
           <div className="px-4 py-2.5 rounded-2xl rounded-tr-sm bg-indigo-600 text-white text-sm">
-            {message.content}
+            {message.displayContent ?? message.content}
           </div>
         </div>
       </div>

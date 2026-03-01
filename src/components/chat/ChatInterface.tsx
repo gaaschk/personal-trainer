@@ -34,7 +34,8 @@ export interface Attachment {
 
 interface Message {
   role: 'user' | 'assistant';
-  content: string;
+  content: string;         // Full content sent to API (includes injected file text)
+  displayContent?: string; // What's shown in the chat bubble (user's typed text only)
   statuses?: string[];
   card?: { type: 'workout_plan'; plan: WorkoutPlan } | null;
   attachments?: Pick<Attachment, 'name' | 'kind'>[];
@@ -103,16 +104,32 @@ export default function ChatInterface({ conversationId, initialMessages = [] }: 
       ? `Please review the attached ${attachments[0].kind === 'pdf' ? 'document' : 'file'}: ${attachments[0].name}`
       : `Please review the ${attachments.length} attached files.`);
 
+    // Split attachments: text/PDF content is embedded in the message (persists in history),
+    // images are sent separately as vision blocks on each API call.
+    const sentAttachments = [...attachments];
+    const textAttachments  = sentAttachments.filter((a) => a.kind !== 'image');
+    const imageAttachments = sentAttachments.filter((a) => a.kind === 'image');
+
+    // Build full API content by prepending file text — this is stored in message state
+    // so it's included in every subsequent API call's message history.
+    let fullContent = displayText;
+    for (const att of textAttachments) {
+      const label = att.kind === 'pdf'
+        ? `[Attached PDF: "${att.name}"${att.pages ? ` — ${att.pages} pages` : ''}]`
+        : `[Attached file: "${att.name}"]`;
+      fullContent = `${label}\n\`\`\`\n${att.content}\n\`\`\`\n\n${fullContent}`;
+    }
+
     const userMsg: Message = {
-      role: 'user',
-      content: displayText,
-      statuses: [],
-      attachments: attachments.map(({ name, kind }) => ({ name, kind })),
+      role:           'user',
+      content:        fullContent,   // Full content (with file text) — sent to API in all future turns
+      displayContent: displayText,   // Only the typed text — shown in the chat bubble
+      statuses:       [],
+      attachments:    sentAttachments.map(({ name, kind }) => ({ name, kind })),
     };
     const nextMessages = [...messages, userMsg];
     setMessages(nextMessages);
     setInput('');
-    const sentAttachments = [...attachments];
     setAttachments([]);
     setStreaming(true);
 
@@ -131,7 +148,8 @@ export default function ChatInterface({ conversationId, initialMessages = [] }: 
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           messages: nextMessages.map((m) => ({ role: m.role, content: m.content })),
-          attachments: sentAttachments.length ? sentAttachments : undefined,
+          // Only pass images to the server — PDF/text is already in the message content
+          attachments: imageAttachments.length ? imageAttachments : undefined,
           conversationId,
         }),
       });

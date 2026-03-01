@@ -68,18 +68,15 @@ export async function POST(req: NextRequest) {
           content: m.content,
         }));
 
-        // Inject attachments into the last user message
+        // Inject image attachments into the last user message as vision content blocks.
+        // PDF/text content is already embedded in the message content by the client.
         if (body.attachments?.length) {
           const lastIdx = messages.length - 1;
           const last = messages[lastIdx];
           if (last.role === 'user') {
-            const imageAttachments  = body.attachments.filter((a) => a.kind === 'image');
-            const documentAttachments = body.attachments.filter((a) => a.kind !== 'image');
-
             const contentBlocks: Anthropic.ContentBlockParam[] = [];
 
-            // Image blocks (vision)
-            for (const img of imageAttachments) {
+            for (const img of body.attachments) {
               contentBlocks.push({
                 type: 'image',
                 source: {
@@ -90,18 +87,7 @@ export async function POST(req: NextRequest) {
               });
             }
 
-            // Text blocks: prepend document content before the user's message
-            let userText = '';
-            for (const doc of documentAttachments) {
-              const label = doc.kind === 'pdf'
-                ? `[Attached PDF: "${doc.name}"${doc.pages ? ` — ${doc.pages} pages` : ''}]`
-                : `[Attached file: "${doc.name}"]`;
-              userText += `${label}\n\`\`\`\n${doc.content}\n\`\`\`\n\n`;
-            }
-            userText += last.content as string;
-
-            contentBlocks.push({ type: 'text', text: userText });
-
+            contentBlocks.push({ type: 'text', text: last.content as string });
             messages[lastIdx] = { role: 'user', content: contentBlocks };
           }
         }
