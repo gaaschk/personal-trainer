@@ -1,0 +1,329 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ── Auth models (NextAuth conventions) ──────────────────────────────────────
+
+model User {
+  id            String    @id @default(cuid())
+  name          String?
+  email         String    @unique
+  emailVerified DateTime? @map("email_verified")
+  image         String?
+  password      String?
+  createdAt     DateTime  @default(now()) @map("created_at")
+  updatedAt     DateTime  @updatedAt @map("updated_at")
+
+  accounts         Account[]
+  sessions         Session[]
+  healthProfile    HealthProfile?
+  workoutSessions  WorkoutSession[]
+  bodyMetrics      BodyMetric[]
+  conversations    Conversation[]
+
+  @@map("users")
+}
+
+model Account {
+  id                String  @id @default(cuid())
+  userId            String  @map("user_id")
+  type              String
+  provider          String
+  providerAccountId String  @map("provider_account_id")
+  refresh_token     String? @db.Text
+  access_token      String? @db.Text
+  expires_at        Int?
+  token_type        String?
+  scope             String?
+  id_token          String? @db.Text
+  session_state     String?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerAccountId])
+  @@map("accounts")
+}
+
+model Session {
+  id           String   @id @default(cuid())
+  sessionToken String   @unique @map("session_token")
+  userId       String   @map("user_id")
+  expires      DateTime
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("sessions")
+}
+
+model VerificationToken {
+  identifier String
+  token      String   @unique
+  expires    DateTime
+
+  @@unique([identifier, token])
+  @@map("verification_tokens")
+}
+
+// ── Health Profile ───────────────────────────────────────────────────────────
+
+model HealthProfile {
+  id           String       @id @default(cuid())
+  userId       String       @unique @map("user_id")
+  age          Int?
+  weightKg     Float?       @map("weight_kg")
+  heightCm     Float?       @map("height_cm")
+  fitnessLevel FitnessLevel @default(BEGINNER) @map("fitness_level")
+  notes        String?
+  createdAt    DateTime     @default(now()) @map("created_at")
+  updatedAt    DateTime     @updatedAt @map("updated_at")
+
+  user            User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  injuries        Injury[]
+  goals           Goal[]
+  equipmentItems  EquipmentItem[]
+  gymMemberships  GymMembership[]
+  trainingPlans   TrainingPlan[]
+
+  @@map("health_profiles")
+}
+
+enum FitnessLevel {
+  BEGINNER
+  INTERMEDIATE
+  ADVANCED
+}
+
+model Injury {
+  id          String  @id @default(cuid())
+  profileId   String  @map("profile_id")
+  description String
+  tag         String
+  active      Boolean @default(true)
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  profile HealthProfile @relation(fields: [profileId], references: [id], onDelete: Cascade)
+
+  @@map("injuries")
+}
+
+model Goal {
+  id          String    @id @default(cuid())
+  profileId   String    @map("profile_id")
+  type        GoalType
+  title       String
+  targetDate  DateTime? @map("target_date")
+  seasonStart DateTime? @map("season_start")
+  seasonEnd   DateTime? @map("season_end")
+  active      Boolean   @default(true)
+  createdAt   DateTime  @default(now()) @map("created_at")
+
+  profile HealthProfile @relation(fields: [profileId], references: [id], onDelete: Cascade)
+
+  @@map("goals")
+}
+
+enum GoalType {
+  MAINTENANCE
+  EVENT
+  SEASONAL
+}
+
+// ── Equipment ────────────────────────────────────────────────────────────────
+
+model EquipmentItem {
+  id        String  @id @default(cuid())
+  profileId String  @map("profile_id")
+  name      String
+  category  String?
+  notes     String?
+  createdAt DateTime @default(now()) @map("created_at")
+
+  profile HealthProfile @relation(fields: [profileId], references: [id], onDelete: Cascade)
+
+  @@map("equipment_items")
+}
+
+model GymMembership {
+  id        String  @id @default(cuid())
+  profileId String  @map("profile_id")
+  gymName   String  @map("gym_name")
+  address   String?
+  notes     String?
+  equipment String?
+  active    Boolean @default(true)
+  createdAt DateTime @default(now()) @map("created_at")
+
+  profile HealthProfile @relation(fields: [profileId], references: [id], onDelete: Cascade)
+
+  @@map("gym_memberships")
+}
+
+// ── Training Plans ───────────────────────────────────────────────────────────
+
+model TrainingPlan {
+  id          String      @id @default(cuid())
+  profileId   String      @map("profile_id")
+  title       String
+  description String?
+  status      PlanStatus  @default(ACTIVE)
+  startDate   DateTime?   @map("start_date")
+  endDate     DateTime?   @map("end_date")
+  rawJson     String?     @map("raw_json") @db.Text
+  createdAt   DateTime    @default(now()) @map("created_at")
+  updatedAt   DateTime    @updatedAt @map("updated_at")
+
+  profile  HealthProfile    @relation(fields: [profileId], references: [id], onDelete: Cascade)
+  planDays TrainingPlanDay[]
+
+  @@map("training_plans")
+}
+
+enum PlanStatus {
+  ACTIVE
+  ARCHIVED
+}
+
+model TrainingPlanDay {
+  id        String   @id @default(cuid())
+  planId    String   @map("plan_id")
+  dayOfWeek Int      @map("day_of_week")
+  weekNumber Int     @default(1) @map("week_number")
+  focusArea String?  @map("focus_area")
+  notes     String?
+  order     Int      @default(0)
+
+  plan             TrainingPlan      @relation(fields: [planId], references: [id], onDelete: Cascade)
+  plannedExercises PlannedExercise[]
+  workoutSessions  WorkoutSession[]
+
+  @@map("training_plan_days")
+}
+
+model PlannedExercise {
+  id         String  @id @default(cuid())
+  planDayId  String  @map("plan_day_id")
+  name       String
+  sets       Int?
+  reps       String?
+  weight     String?
+  duration   String?
+  notes      String?
+  order      Int     @default(0)
+
+  planDay TrainingPlanDay @relation(fields: [planDayId], references: [id], onDelete: Cascade)
+
+  @@map("planned_exercises")
+}
+
+// ── Workout Sessions ─────────────────────────────────────────────────────────
+
+model WorkoutSession {
+  id           String          @id @default(cuid())
+  userId       String          @map("user_id")
+  planDayId    String?         @map("plan_day_id")
+  title        String
+  scheduledAt  DateTime?       @map("scheduled_at")
+  startedAt    DateTime?       @map("started_at")
+  completedAt  DateTime?       @map("completed_at")
+  durationMin  Int?            @map("duration_min")
+  status       SessionStatus   @default(PLANNED)
+  notes        String?
+  createdAt    DateTime        @default(now()) @map("created_at")
+
+  user              User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  planDay           TrainingPlanDay? @relation(fields: [planDayId], references: [id])
+  workoutExercises  WorkoutExercise[]
+
+  @@map("workout_sessions")
+}
+
+enum SessionStatus {
+  PLANNED
+  IN_PROGRESS
+  COMPLETED
+  SKIPPED
+}
+
+model WorkoutExercise {
+  id        String  @id @default(cuid())
+  sessionId String  @map("session_id")
+  name      String
+  order     Int     @default(0)
+  notes     String?
+
+  session WorkoutSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  sets    ExerciseSet[]
+
+  @@map("workout_exercises")
+}
+
+model ExerciseSet {
+  id           String    @id @default(cuid())
+  exerciseId   String    @map("exercise_id")
+  setNumber    Int       @map("set_number")
+  weightKg     Float?    @map("weight_kg")
+  reps         Int?
+  durationSec  Int?      @map("duration_sec")
+  distanceM    Float?    @map("distance_m")
+  rpe          Int?
+  completed    Boolean   @default(false)
+  completedAt  DateTime? @map("completed_at")
+
+  exercise WorkoutExercise @relation(fields: [exerciseId], references: [id], onDelete: Cascade)
+
+  @@map("exercise_sets")
+}
+
+// ── Metrics & Chat ───────────────────────────────────────────────────────────
+
+model BodyMetric {
+  id           String   @id @default(cuid())
+  userId       String   @map("user_id")
+  date         DateTime @db.Date
+  weightKg     Float?   @map("weight_kg")
+  bodyFatPct   Float?   @map("body_fat_pct")
+  notes        String?
+  createdAt    DateTime @default(now()) @map("created_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, date])
+  @@map("body_metrics")
+}
+
+model Conversation {
+  id        String   @id @default(cuid())
+  userId    String   @map("user_id")
+  title     String?
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  user     User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  messages Message[]
+
+  @@map("conversations")
+}
+
+model Message {
+  id             String      @id @default(cuid())
+  conversationId String      @map("conversation_id")
+  role           MessageRole
+  content        String      @db.Text
+  metadata       Json?
+  createdAt      DateTime    @default(now()) @map("created_at")
+
+  conversation Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+
+  @@map("messages")
+}
+
+enum MessageRole {
+  USER
+  ASSISTANT
+  TOOL
+}
