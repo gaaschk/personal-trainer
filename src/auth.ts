@@ -11,6 +11,16 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
   ...authConfig,
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   adapter: PrismaAdapter(prisma) as any,
+  events: {
+    // When any OAuth provider creates a brand-new user, make them ADMIN
+    // if they're the first user in the DB (same rule as the credentials signup route).
+    async createUser({ user }) {
+      const count = await prisma.user.count();
+      if (count === 1) {
+        await prisma.user.update({ where: { id: user.id }, data: { role: 'ADMIN' } });
+      }
+    },
+  },
   providers: [
     Credentials({
       credentials: {
