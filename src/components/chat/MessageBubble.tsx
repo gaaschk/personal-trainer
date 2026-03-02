@@ -1,3 +1,6 @@
+'use client';
+
+import { useState, useEffect } from 'react';
 import WorkoutPlanCard from './WorkoutPlanCard';
 
 interface WorkoutPlan {
@@ -21,12 +24,27 @@ interface WorkoutPlan {
 }
 
 interface Message {
-  role: 'user' | 'assistant';
-  content: string;
-  displayContent?: string;
-  statuses?: string[];
-  card?: { type: 'workout_plan'; plan: WorkoutPlan } | null;
+  role:         'user' | 'assistant';
+  content:      string;
+  statuses?:    string[];
+  card?:        { type: 'workout_plan'; plan: WorkoutPlan } | null;
   attachments?: { name: string; kind: string }[];
+  timestamp?:   number; // epoch ms — set when message is complete
+  durationMs?:  number; // assistant only: total response time
+  streamingAt?: number; // assistant only: epoch ms when streaming started (cleared on finish)
+}
+
+function formatTime(ts: number) {
+  return new Date(ts).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true });
+}
+
+function ElapsedTimer({ startTime }: { startTime: number }) {
+  const [secs, setSecs] = useState(() => Math.floor((Date.now() - startTime) / 1000));
+  useEffect(() => {
+    const id = setInterval(() => setSecs(Math.floor((Date.now() - startTime) / 1000)), 1000);
+    return () => clearInterval(id);
+  }, [startTime]);
+  return <>{secs}s…</>;
 }
 
 export default function MessageBubble({ message }: { message: Message }) {
@@ -49,8 +67,11 @@ export default function MessageBubble({ message }: { message: Message }) {
             </div>
           ))}
           <div className="px-4 py-2.5 rounded-2xl rounded-tr-sm bg-indigo-600 text-white text-sm">
-            {message.displayContent ?? message.content}
+            {message.content}
           </div>
+          {message.timestamp && (
+            <p className="text-right text-xs text-gray-600 pr-1">{formatTime(message.timestamp)}</p>
+          )}
         </div>
       </div>
     );
@@ -96,6 +117,15 @@ export default function MessageBubble({ message }: { message: Message }) {
         {message.card?.type === 'workout_plan' && (
           <WorkoutPlanCard plan={message.card.plan} />
         )}
+
+        {/* Timestamp / elapsed */}
+        <p className="mt-1 text-xs text-gray-600">
+          {message.timestamp
+            ? <>{formatTime(message.timestamp)}{message.durationMs != null ? ` · ${Math.round(message.durationMs / 1000)}s` : ''}</>
+            : message.streamingAt
+              ? <ElapsedTimer startTime={message.streamingAt} />
+              : null}
+        </p>
       </div>
     </div>
   );

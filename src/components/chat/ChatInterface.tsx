@@ -24,21 +24,24 @@ interface WorkoutPlan {
   }[];
 }
 
+// Attachment metadata only — content stays on server after upload
 export interface Attachment {
-  name: string;
-  kind: 'pdf' | 'text' | 'image';
-  content: string;
+  id:       string;
+  name:     string;
+  kind:     'pdf' | 'text' | 'image';
+  pages?:   number;
   mimeType?: string;
-  pages?: number;
 }
 
 interface Message {
-  role: 'user' | 'assistant';
-  content: string;         // Full content sent to API (includes injected file text)
-  displayContent?: string; // What's shown in the chat bubble (user's typed text only)
-  statuses?: string[];
-  card?: { type: 'workout_plan'; plan: WorkoutPlan } | null;
+  role:         'user' | 'assistant';
+  content:      string;
+  statuses?:    string[];
+  card?:        { type: 'workout_plan'; plan: WorkoutPlan } | null;
   attachments?: Pick<Attachment, 'name' | 'kind'>[];
+  timestamp?:   number; // epoch ms — set when message is complete
+  durationMs?:  number; // assistant only: total response time
+  streamingAt?: number; // assistant only: epoch ms when streaming started (cleared on finish)
 }
 
 interface Props {
@@ -48,16 +51,17 @@ interface Props {
 
 const ACCEPTED_TYPES = '.pdf,.txt,.csv,.json,image/jpeg,image/png,image/gif,image/webp';
 
-export default function ChatInterface({ conversationId, initialMessages = [] }: Props) {
-  const [messages, setMessages]       = useState<Message[]>(initialMessages);
-  const [input, setInput]             = useState('');
-  const [streaming, setStreaming]     = useState(false);
-  const [attachments, setAttachments] = useState<Attachment[]>([]);
-  const [uploading, setUploading]     = useState(false);
-  const [uploadError, setUploadError] = useState('');
+export default function ChatInterface({ conversationId: initialConversationId, initialMessages = [] }: Props) {
+  const [messages, setMessages]         = useState<Message[]>(initialMessages);
+  const [input, setInput]               = useState('');
+  const [streaming, setStreaming]       = useState(false);
+  const [attachments, setAttachments]   = useState<Attachment[]>([]);
+  const [uploading, setUploading]       = useState(false);
+  const [uploadError, setUploadError]   = useState('');
+  const [conversationId, setConversationId] = useState(initialConversationId);
 
-  const bottomRef   = useRef<HTMLDivElement>(null);
-  const inputRef    = useRef<HTMLTextAreaElement>(null);
+  const bottomRef    = useRef<HTMLDivElement>(null);
+  const inputRef     = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -80,7 +84,7 @@ export default function ChatInterface({ conversationId, initialMessages = [] }: 
       const res = await fetch('/api/upload', { method: 'POST', body: form });
       const data = await res.json() as Attachment & { error?: string };
       if (!res.ok) {
-        setUploadError(data.error ?? 'Upload failed');
+        setUploadError((data as { error?: string }).error ?? 'Upload failed');
       } else {
         setAttachments((prev) => [...prev, data]);
       }
@@ -104,53 +108,39 @@ export default function ChatInterface({ conversationId, initialMessages = [] }: 
       ? `Please review the attached ${attachments[0].kind === 'pdf' ? 'document' : 'file'}: ${attachments[0].name}`
       : `Please review the ${attachments.length} attached files.`);
 
-    // Split attachments: text/PDF content is embedded in the message (persists in history),
-    // images are sent separately as vision blocks on each API call.
     const sentAttachments = [...attachments];
-    const textAttachments  = sentAttachments.filter((a) => a.kind !== 'image');
-    const imageAttachments = sentAttachments.filter((a) => a.kind === 'image');
-
-    // Build full API content by prepending file text — this is stored in message state
-    // so it's included in every subsequent API call's message history.
-    let fullContent = displayText;
-    for (const att of textAttachments) {
-      const label = att.kind === 'pdf'
-        ? `[Attached PDF: "${att.name}"${att.pages ? ` — ${att.pages} pages` : ''}]`
-        : `[Attached file: "${att.name}"]`;
-      fullContent = `${label}\n\`\`\`\n${att.content}\n\`\`\`\n\n${fullContent}`;
-    }
+    const textAttachmentIds  = sentAttachments.filter((a) => a.kind !== 'image').map((a) => a.id);
+    const imageAttachmentIds = sentAttachments.filter((a) => a.kind === 'image').map((a) => a.id);
 
     const userMsg: Message = {
-      role:           'user',
-      content:        fullContent,   // Full content (with file text) — sent to API in all future turns
-      displayContent: displayText,   // Only the typed text — shown in the chat bubble
-      statuses:       [],
-      attachments:    sentAttachments.map(({ name, kind }) => ({ name, kind })),
+      role:        'user',
+      content:     displayText,
+      statuses:    [],
+      attachments: sentAttachments.map(({ name, kind }) => ({ name, kind })),
+      timestamp:   Date.now(),
     };
-    const nextMessages = [...messages, userMsg];
-    setMessages(nextMessages);
+    setMessages((prev) => [...prev, userMsg]);
     setInput('');
     setAttachments([]);
     setStreaming(true);
 
-    // Reset textarea height
     if (inputRef.current) {
       inputRef.current.style.height = 'auto';
     }
 
-    // Placeholder assistant message
-    const assistantMsg: Message = { role: 'assistant', content: '', statuses: [] };
+    const streamStart = Date.now();
+    const assistantMsg: Message = { role: 'assistant', content: '', statuses: [], streamingAt: streamStart };
     setMessages((prev) => [...prev, assistantMsg]);
 
     try {
       const res = await fetch('/api/chat', {
-        method: 'POST',
+        method:  'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          messages: nextMessages.map((m) => ({ role: m.role, content: m.content })),
-          // Only pass images to the server — PDF/text is already in the message content
-          attachments: imageAttachments.length ? imageAttachments : undefined,
+          message:            text,
           conversationId,
+          attachmentIds:      textAttachmentIds.length  ? textAttachmentIds  : undefined,
+          imageAttachmentIds: imageAttachmentIds.length ? imageAttachmentIds : undefined,
         }),
       });
 
@@ -185,7 +175,10 @@ export default function ChatInterface({ conversationId, initialMessages = [] }: 
           try {
             const evt = JSON.parse(line) as { t: string; v?: string };
 
-            if (evt.t === 's') {
+            if (evt.t === 'ci') {
+              // Server assigned a new conversation ID
+              setConversationId(evt.v);
+            } else if (evt.t === 's') {
               setMessages((prev) => {
                 const copy = [...prev];
                 const last = { ...copy[copy.length - 1] };
@@ -225,7 +218,21 @@ export default function ChatInterface({ conversationId, initialMessages = [] }: 
         }
       }
     } finally {
+      const endTime = Date.now();
       setStreaming(false);
+      setMessages((prev) => {
+        const copy = [...prev];
+        const last = copy[copy.length - 1];
+        if (last?.role === 'assistant' && last.streamingAt) {
+          copy[copy.length - 1] = {
+            ...last,
+            timestamp:   endTime,
+            durationMs:  endTime - last.streamingAt,
+            streamingAt: undefined,
+          };
+        }
+        return copy;
+      });
     }
   }, [input, attachments, messages, streaming, conversationId]);
 
