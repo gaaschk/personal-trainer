@@ -1,28 +1,36 @@
-import { notFound } from 'next/navigation';
-import { signIn } from '@/auth';
+'use client';
 
-interface Props {
-  searchParams: Promise<{
-    provider?: string;
-    state?: string;
-    deviceName?: string;
-    platform?: string;
-  }>;
-}
+import { useEffect } from 'react';
+import { signIn } from 'next-auth/react';
+import { useSearchParams } from 'next/navigation';
 
-export default async function MobileSignInPage({ searchParams }: Props) {
-  const { provider, state = '', deviceName = '', platform = '' } = await searchParams;
+export default function MobileSignInPage() {
+  const searchParams = useSearchParams();
+  const provider    = searchParams.get('provider');
+  const state       = searchParams.get('state')      ?? '';
+  const deviceName  = searchParams.get('deviceName') ?? '';
+  const platform    = searchParams.get('platform')   ?? '';
 
-  if (provider !== 'google' && provider !== 'apple') {
-    notFound();
-  }
+  useEffect(() => {
+    if (provider !== 'google' && provider !== 'apple') return;
 
-  const completeUrl =
-    `/api/mobile/auth/complete` +
-    `?state=${encodeURIComponent(state)}` +
-    `&deviceName=${encodeURIComponent(deviceName)}` +
-    `&platform=${encodeURIComponent(platform)}`;
+    const callbackUrl =
+      `/api/mobile/auth/complete` +
+      `?state=${encodeURIComponent(state)}` +
+      `&deviceName=${encodeURIComponent(deviceName)}` +
+      `&platform=${encodeURIComponent(platform)}`;
 
-  // signIn() in a server component throws NEXT_REDIRECT — no JSX is rendered
-  await signIn(provider, { redirectTo: completeUrl });
+    signIn(provider, { callbackUrl });
+  }, [provider, state, deviceName, platform]);
+
+  const label = provider === 'apple' ? 'Apple' : 'Google';
+
+  return (
+    <div style={{
+      display: 'flex', alignItems: 'center', justifyContent: 'center',
+      height: '100vh', fontFamily: 'system-ui, sans-serif', color: '#6b7280',
+    }}>
+      Redirecting to {label} sign-in…
+    </div>
+  );
 }
