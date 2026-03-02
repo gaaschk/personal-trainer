@@ -10,12 +10,12 @@ echo "Installing dependencies..."
 # Must NOT set NODE_ENV=production here — Next.js build needs devDependencies (Tailwind, PostCSS, etc.)
 npm ci --include=dev
 
-echo "Running database migrations..."
-npx prisma migrate deploy
-
 echo "Stopping PM2 to free memory for build..."
 pm2 stop trainer 2>/dev/null || true
-sleep 3  # Allow SQLite WAL connections to fully close
+
+echo "Running database migrations..."
+# Run after stopping PM2 so the WAL lock is fully released
+npx prisma migrate deploy
 
 echo "Building application..."
 NODE_ENV=production npm run build
