@@ -14,7 +14,8 @@ echo "Stopping PM2 to free memory for build..."
 pm2 stop trainer 2>/dev/null || true
 
 echo "Running database migrations..."
-# Run after stopping PM2 so the WAL lock is fully released
+# Checkpoint WAL so Prisma can acquire exclusive lock
+python3 -c "import sqlite3,time; db='/home/ubuntu/personal-trainer/trainer.db'; c=sqlite3.connect(db,timeout=10); c.execute('PRAGMA wal_checkpoint(TRUNCATE)'); c.close(); print('WAL checkpoint done')" 2>/dev/null || true
 npx prisma migrate deploy
 
 echo "Building application..."
