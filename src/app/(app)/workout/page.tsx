@@ -4,6 +4,7 @@ import Link from 'next/link';
 import { formatDate } from '@/lib/utils';
 import Badge from '@/components/ui/Badge';
 import { Card, CardContent } from '@/components/ui/Card';
+import WorkoutDeleteButton from '@/components/workout/WorkoutDeleteButton';
 
 export const dynamic = 'force-dynamic';
 
@@ -40,19 +41,23 @@ export default async function WorkoutHistoryPage() {
           <h2 className="text-sm font-medium text-gray-400 mb-2">Planned</h2>
           <div className="space-y-2">
             {planned.map((s) => (
-              <Link
-                key={s.id}
-                href={`/workout/active?sessionId=${s.id}`}
-                className="flex items-center justify-between p-3 rounded-xl bg-gray-800 border border-gray-700 hover:bg-gray-750 transition-colors"
-              >
-                <div>
-                  <p className="text-sm font-medium text-white">{s.title}</p>
-                  {s.scheduledAt && (
-                    <p className="text-xs text-gray-500">{formatDate(s.scheduledAt)}</p>
-                  )}
+              <div key={s.id} className="relative">
+                <Link
+                  href={`/workout/active?sessionId=${s.id}`}
+                  className="flex items-center justify-between p-3 pr-10 rounded-xl bg-gray-800 border border-gray-700 hover:bg-gray-750 transition-colors"
+                >
+                  <div>
+                    <p className="text-sm font-medium text-white">{s.title}</p>
+                    {s.scheduledAt && (
+                      <p className="text-xs text-gray-500">{formatDate(s.scheduledAt)}</p>
+                    )}
+                  </div>
+                  <Badge variant="blue">Planned</Badge>
+                </Link>
+                <div className="absolute right-2 top-1/2 -translate-y-1/2">
+                  <WorkoutDeleteButton sessionId={s.id} />
                 </div>
-                <Badge variant="blue">Planned</Badge>
-              </Link>
+              </div>
             ))}
           </div>
         </div>
@@ -72,21 +77,25 @@ export default async function WorkoutHistoryPage() {
         ) : (
           <div className="space-y-2">
             {completed.map((s) => (
-              <Link
-                key={s.id}
-                href={`/workout/${s.id}`}
-                className="flex items-center justify-between p-3 rounded-xl bg-gray-800 border border-gray-700 hover:bg-gray-750 transition-colors"
-              >
-                <div>
-                  <p className="text-sm font-medium text-white">{s.title}</p>
-                  <p className="text-xs text-gray-500">
-                    {s.completedAt ? formatDate(s.completedAt) : ''}
-                    {s.durationMin ? ` · ${s.durationMin} min` : ''}
-                    {s._count.workoutExercises > 0 ? ` · ${s._count.workoutExercises} exercises` : ''}
-                  </p>
+              <div key={s.id} className="relative">
+                <Link
+                  href={`/workout/${s.id}`}
+                  className="flex items-center justify-between p-3 pr-10 rounded-xl bg-gray-800 border border-gray-700 hover:bg-gray-750 transition-colors"
+                >
+                  <div>
+                    <p className="text-sm font-medium text-white">{s.title}</p>
+                    <p className="text-xs text-gray-500">
+                      {s.completedAt ? formatDate(s.completedAt) : ''}
+                      {s.durationMin ? ` · ${s.durationMin} min` : ''}
+                      {s._count.workoutExercises > 0 ? ` · ${s._count.workoutExercises} exercises` : ''}
+                    </p>
+                  </div>
+                  <Badge variant="green">Done</Badge>
+                </Link>
+                <div className="absolute right-2 top-1/2 -translate-y-1/2">
+                  <WorkoutDeleteButton sessionId={s.id} />
                 </div>
-                <Badge variant="green">Done</Badge>
-              </Link>
+              </div>
             ))}
           </div>
         )}

@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { formatDate } from '@/lib/utils';
 import Badge from '@/components/ui/Badge';
 import { Card, CardContent } from '@/components/ui/Card';
+import WorkoutActions from '@/components/workout/WorkoutActions';
 
 type Params = { params: Promise<{ sessionId: string }> };
 
@@ -47,15 +48,25 @@ export default async function WorkoutSummaryPage({ params }: Params) {
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M15 19l-7-7 7-7" />
           </svg>
         </Link>
-        <div>
-          <h1 className="text-xl font-bold text-white">{workoutSession.title}</h1>
+        <div className="flex-1 min-w-0">
+          <h1 className="text-xl font-bold text-white truncate">{workoutSession.title}</h1>
           <p className="text-gray-400 text-sm">
             {workoutSession.completedAt ? formatDate(workoutSession.completedAt) : ''}
           </p>
         </div>
-        <Badge variant={workoutSession.status === 'COMPLETED' ? 'green' : 'yellow'} className="ml-auto">
-          {workoutSession.status.toLowerCase()}
-        </Badge>
+        <div className="flex items-center gap-2 shrink-0">
+          <Badge variant={workoutSession.status === 'COMPLETED' ? 'green' : 'yellow'}>
+            {workoutSession.status.toLowerCase()}
+          </Badge>
+          <WorkoutActions
+            sessionId={workoutSession.id}
+            title={workoutSession.title}
+            completedAt={workoutSession.completedAt?.toISOString() ?? null}
+            durationMin={workoutSession.durationMin}
+            notes={workoutSession.notes}
+            status={workoutSession.status}
+          />
+        </div>
       </div>
 
       {/* Stats */}
