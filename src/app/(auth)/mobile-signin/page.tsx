@@ -1,10 +1,10 @@
 'use client';
 
-import { useEffect } from 'react';
+import { Suspense, useEffect } from 'react';
 import { signIn } from 'next-auth/react';
 import { useSearchParams } from 'next/navigation';
 
-export default function MobileSignInPage() {
+function MobileSignIn() {
   const searchParams = useSearchParams();
   const provider    = searchParams.get('provider');
   const state       = searchParams.get('state')      ?? '';
@@ -32,5 +32,13 @@ export default function MobileSignInPage() {
     }}>
       Redirecting to {label} sign-in…
     </div>
+  );
+}
+
+export default function MobileSignInPage() {
+  return (
+    <Suspense>
+      <MobileSignIn />
+    </Suspense>
   );
 }
