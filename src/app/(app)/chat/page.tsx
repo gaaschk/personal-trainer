@@ -10,44 +10,44 @@ export default async function ChatPage() {
   if (!session?.user?.id) redirect('/login');
   const userId = session.user.id;
 
-  // Load the most recent conversation + its messages so Coach has full context
-  const recentConversation = await prisma.conversation.findFirst({
-    where:   { userId },
-    orderBy: { updatedAt: 'desc' },
-    include: {
-      messages: {
-        where:   { role: { in: ['USER', 'ASSISTANT'] } },
-        orderBy: { createdAt: 'asc' },
-        take:    60, // last 60 messages is plenty for context display
+  // Load all conversations + most recent conversation's messages
+  const [allConversations, recentConversation] = await Promise.all([
+    prisma.conversation.findMany({
+      where:   { userId },
+      orderBy: { updatedAt: 'desc' },
+      select:  { id: true, title: true, updatedAt: true },
+    }),
+    prisma.conversation.findFirst({
+      where:   { userId },
+      orderBy: { updatedAt: 'desc' },
+      include: {
+        messages: {
+          where:   { role: { in: ['USER', 'ASSISTANT'] } },
+          orderBy: { createdAt: 'asc' },
+          take:    60,
+        },
       },
-    },
-  });
+    }),
+  ]);
 
   const initialMessages = recentConversation?.messages.map((m) => ({
     role:    m.role === 'USER' ? ('user' as const) : ('assistant' as const),
-    // Use displayContent when available (strips embedded PDF/file text)
     content: (m.displayContent ?? m.content) || '',
   })) ?? [];
 
+  const conversations = allConversations.map((c) => ({
+    id:        c.id,
+    title:     c.title,
+    updatedAt: c.updatedAt.toISOString(),
+  }));
+
   return (
-    <div className="h-screen flex flex-col">
-      <div className="px-4 py-3 border-b border-gray-800 flex items-center gap-2">
-        <div className="w-7 h-7 rounded-lg bg-indigo-600 flex items-center justify-center">
-          <svg className="w-3.5 h-3.5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
-          </svg>
-        </div>
-        <div>
-          <h1 className="text-sm font-semibold text-white">Coach</h1>
-          <p className="text-xs text-green-400">Online</p>
-        </div>
-      </div>
-      <div className="flex-1 overflow-hidden">
-        <ChatInterface
-          conversationId={recentConversation?.id}
-          initialMessages={initialMessages}
-        />
-      </div>
+    <div className="h-screen overflow-hidden">
+      <ChatInterface
+        conversationId={recentConversation?.id}
+        initialMessages={initialMessages}
+        conversations={conversations}
+      />
     </div>
   );
 }

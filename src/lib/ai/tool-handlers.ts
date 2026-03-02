@@ -269,7 +269,7 @@ export async function handleGetProgress(userId: string, input: { days?: number }
   const days = input.days ?? 30;
   const since = new Date(Date.now() - days * 24 * 60 * 60 * 1000);
 
-  const [metrics, sessions] = await Promise.all([
+  const [metrics, sessions, deviceActivity, deviceVitals, sleepLogs, deviceWorkouts] = await Promise.all([
     prisma.bodyMetric.findMany({
       where: { userId, date: { gte: since } },
       orderBy: { date: 'asc' },
@@ -283,6 +283,22 @@ export async function handleGetProgress(userId: string, input: { days?: number }
           orderBy: { order: 'asc' },
         },
       },
+    }),
+    prisma.dailyActivity.findMany({
+      where: { userId, date: { gte: since } },
+      orderBy: { date: 'asc' },
+    }),
+    prisma.vitals.findMany({
+      where: { userId, date: { gte: since } },
+      orderBy: { date: 'asc' },
+    }),
+    prisma.sleepLog.findMany({
+      where: { userId, startTime: { gte: since } },
+      orderBy: { startTime: 'asc' },
+    }),
+    prisma.deviceWorkout.findMany({
+      where: { userId, startTime: { gte: since } },
+      orderBy: { startTime: 'asc' },
     }),
   ]);
 
@@ -302,6 +318,11 @@ export async function handleGetProgress(userId: string, input: { days?: number }
     }
   }
 
+  // Average sleep hours
+  const avgSleepHrs = sleepLogs.length
+    ? Math.round((sleepLogs.reduce((sum, s) => sum + s.durationHrs, 0) / sleepLogs.length) * 10) / 10
+    : null;
+
   return {
     period: `${days} days`,
     workoutsCompleted: sessions.length,
@@ -318,6 +339,29 @@ export async function handleGetProgress(userId: string, input: { days?: number }
       title:       s.title,
       date:        s.completedAt?.toISOString().split('T')[0],
       durationMin: s.durationMin,
+    })),
+    deviceActivity: deviceActivity.map((a) => ({
+      date:            a.date.toISOString().split('T')[0],
+      steps:           a.steps,
+      activeCalories:  a.activeCalories,
+      exerciseMinutes: a.exerciseMinutes,
+    })),
+    recentVitals: deviceVitals.map((v) => ({
+      date:      v.date.toISOString().split('T')[0],
+      restingHR: v.restingHR,
+      hrvMs:     v.hrvMs,
+      vo2MaxMl:  v.vo2MaxMl,
+      spo2Pct:   v.spo2Pct,
+    })),
+    avgSleepHrs,
+    deviceWorkouts: deviceWorkouts.map((w) => ({
+      date:          w.startTime.toISOString().split('T')[0],
+      activityType:  w.activityType,
+      title:         w.title,
+      durationMin:   w.durationMin,
+      distanceM:     w.distanceM,
+      caloriesBurned: w.caloriesBurned,
+      avgHR:         w.avgHR,
     })),
   };
 }

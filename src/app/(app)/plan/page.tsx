@@ -62,9 +62,15 @@ export default async function PlanPage() {
         </Card>
       ) : (
         <div className="space-y-4">
-          <div className="flex items-center gap-2 mb-2">
+          <div className="flex items-center gap-2 mb-2 flex-wrap">
             <h2 className="text-lg font-semibold text-white">{activePlan.title}</h2>
             <Badge variant="green">Active</Badge>
+            <Link
+              href={`/plan/${activePlan.id}`}
+              className="text-xs text-indigo-400 hover:text-indigo-300 transition-colors ml-auto"
+            >
+              View details →
+            </Link>
           </div>
           {activePlan.description && (
             <p className="text-gray-400 text-sm mb-4">{activePlan.description}</p>
@@ -133,16 +139,20 @@ export default async function PlanPage() {
           <h2 className="text-base font-semibold text-gray-400 mb-3">Previous Plans</h2>
           <div className="space-y-2">
             {archivedPlans.map((plan) => (
-              <div
+              <Link
                 key={plan.id}
-                className="flex items-center justify-between p-3 rounded-lg bg-gray-800/50 border border-gray-700"
+                href={`/plan/${plan.id}`}
+                className="flex items-center justify-between p-3 rounded-lg bg-gray-800/50 border border-gray-700 hover:border-gray-600 transition-colors"
               >
                 <div>
                   <p className="text-sm font-medium text-gray-300">{plan.title}</p>
                   <p className="text-xs text-gray-500">{plan.planDays.length} days</p>
                 </div>
-                <Badge variant="default">Archived</Badge>
-              </div>
+                <div className="flex items-center gap-2">
+                  <Badge variant="default">Archived</Badge>
+                  <span className="text-xs text-gray-500">→</span>
+                </div>
+              </Link>
             ))}
           </div>
         </div>

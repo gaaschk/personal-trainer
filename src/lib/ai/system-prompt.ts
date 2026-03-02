@@ -6,7 +6,9 @@ import { refreshWeatherCache } from '@/lib/ai/tool-handlers';
 const WEATHER_CACHE_TTL_MS = 24 * 60 * 60 * 1000; // 24 hours
 
 export async function buildSystemPrompt(userId: string): Promise<string> {
-  const [user, profile, recentSessions, recentMetrics] = await Promise.all([
+  const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
+
+  const [user, profile, recentSessions, recentMetrics, recentActivity, recentVitals, recentSleep, recentDeviceWorkouts] = await Promise.all([
     prisma.user.findUnique({ where: { id: userId }, select: { name: true, email: true } }),
     prisma.healthProfile.findUnique({
       where: { userId },
@@ -42,6 +44,22 @@ export async function buildSystemPrompt(userId: string): Promise<string> {
       where: { userId },
       orderBy: { date: 'desc' },
       take: 7,
+    }),
+    prisma.dailyActivity.findMany({
+      where: { userId, date: { gte: sevenDaysAgo } },
+      orderBy: { date: 'desc' },
+    }),
+    prisma.vitals.findMany({
+      where: { userId, date: { gte: sevenDaysAgo } },
+      orderBy: { date: 'desc' },
+    }),
+    prisma.sleepLog.findMany({
+      where: { userId, startTime: { gte: sevenDaysAgo } },
+      orderBy: { startTime: 'desc' },
+    }),
+    prisma.deviceWorkout.findMany({
+      where: { userId, startTime: { gte: sevenDaysAgo } },
+      orderBy: { startTime: 'desc' },
     }),
   ]);
 
@@ -155,7 +173,6 @@ export async function buildSystemPrompt(userId: string): Promise<string> {
   let historySection = '';
   if (recentSessions.length || recentMetrics.length) {
     historySection = `\n## Recent History (last 7 days)\n`;
-    const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
     const recentCompleted = recentSessions.filter(
       (s) => s.completedAt && new Date(s.completedAt) >= sevenDaysAgo,
     );
@@ -177,13 +194,64 @@ export async function buildSystemPrompt(userId: string): Promise<string> {
     }
   }
 
+  // Device health section (Apple Health / Google Health Connect)
+  let deviceHealthSection = '';
+  if (recentActivity.length || recentVitals.length || recentSleep.length || recentDeviceWorkouts.length) {
+    deviceHealthSection = `\n## Device Health (last 7 days — Apple Health / Google Health Connect)\n`;
+    if (recentActivity.length) {
+      deviceHealthSection += `\nActivity:\n`;
+      for (const a of recentActivity) {
+        const date = a.date.toISOString().split('T')[0];
+        const parts: string[] = [];
+        if (a.steps != null)           parts.push(`${a.steps.toLocaleString()} steps`);
+        if (a.activeCalories != null)  parts.push(`${a.activeCalories} kcal`);
+        if (a.exerciseMinutes != null) parts.push(`${a.exerciseMinutes} min`);
+        deviceHealthSection += `  ${date}: ${parts.join(', ')}\n`;
+      }
+    }
+    if (recentVitals.length) {
+      deviceHealthSection += `\nVitals:\n`;
+      for (const v of recentVitals) {
+        const date = v.date.toISOString().split('T')[0];
+        const parts: string[] = [];
+        if (v.restingHR != null) parts.push(`resting HR ${v.restingHR} bpm`);
+        if (v.hrvMs != null)     parts.push(`HRV ${v.hrvMs} ms`);
+        if (v.vo2MaxMl != null)  parts.push(`VO2max ${v.vo2MaxMl} ml/kg/min`);
+        if (v.spo2Pct != null)   parts.push(`SpO2 ${v.spo2Pct}%`);
+        deviceHealthSection += `  ${date}: ${parts.join(', ')}\n`;
+      }
+    }
+    if (recentSleep.length) {
+      deviceHealthSection += `\nSleep:\n`;
+      for (const s of recentSleep) {
+        const date = s.startTime.toISOString().split('T')[0];
+        let line = `  ${date}: ${s.durationHrs.toFixed(1)} hrs`;
+        if (s.efficiencyPct != null) line += ` (${s.efficiencyPct}% efficiency)`;
+        deviceHealthSection += `${line}\n`;
+      }
+    }
+    if (recentDeviceWorkouts.length) {
+      deviceHealthSection += `\nDevice Workouts:\n`;
+      for (const w of recentDeviceWorkouts) {
+        const date = w.startTime.toISOString().split('T')[0];
+        const parts: string[] = [];
+        if (w.durationMin != null)    parts.push(`${w.durationMin} min`);
+        if (w.distanceM != null)      parts.push(`${(w.distanceM / 1000).toFixed(1)} km`);
+        if (w.avgHR != null)          parts.push(`${w.avgHR} avg HR`);
+        if (w.caloriesBurned != null) parts.push(`${w.caloriesBurned} kcal`);
+        const label = w.title ?? w.activityType;
+        deviceHealthSection += `  ${date}: ${label}${parts.length ? ' — ' + parts.join(', ') : ''}\n`;
+      }
+    }
+  }
+
   const today = new Date().toISOString().split('T')[0]; // YYYY-MM-DD
 
   return `You are an expert personal trainer named "Coach" working with ${name}.
 
 Today's date: ${today}
 
-${profileSection}${injuriesSection}${goalsSection}${equipmentSection}${planSection}${historySection}${weatherSection}
+${profileSection}${injuriesSection}${goalsSection}${equipmentSection}${planSection}${historySection}${deviceHealthSection}${weatherSection}
 ## Instructions
 - Only program exercises using available equipment — never suggest equipment not listed
 - Always account for all injuries/limitations in every recommendation

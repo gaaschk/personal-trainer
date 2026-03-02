@@ -4,6 +4,11 @@ import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/Card';
 import WeightChart from '@/components/progress/WeightChart';
 import VolumeChart from '@/components/progress/VolumeChart';
 import StrengthChart from '@/components/progress/StrengthChart';
+import ActivityChart from '@/components/progress/ActivityChart';
+import VitalsChart from '@/components/progress/VitalsChart';
+import SleepChart from '@/components/progress/SleepChart';
+import DeviceWorkoutsChart from '@/components/progress/DeviceWorkoutsChart';
+import LogMeasurementButton from '@/components/progress/LogMeasurementButton';
 import Link from 'next/link';
 
 export const dynamic = 'force-dynamic';
@@ -14,7 +19,7 @@ export default async function ProgressPage() {
 
   const ninetyDaysAgo = new Date(Date.now() - 90 * 24 * 60 * 60 * 1000);
 
-  const [metrics, sessions] = await Promise.all([
+  const [metrics, sessions, activity, vitals, sleep, deviceWorkouts] = await Promise.all([
     prisma.bodyMetric.findMany({
       where: { userId, date: { gte: ninetyDaysAgo } },
       orderBy: { date: 'asc' },
@@ -27,6 +32,22 @@ export default async function ProgressPage() {
           include: { sets: { where: { completed: true } } },
         },
       },
+    }),
+    prisma.dailyActivity.findMany({
+      where: { userId, date: { gte: ninetyDaysAgo } },
+      orderBy: { date: 'asc' },
+    }),
+    prisma.vitals.findMany({
+      where: { userId, date: { gte: ninetyDaysAgo } },
+      orderBy: { date: 'asc' },
+    }),
+    prisma.sleepLog.findMany({
+      where: { userId, startTime: { gte: ninetyDaysAgo } },
+      orderBy: { startTime: 'asc' },
+    }),
+    prisma.deviceWorkout.findMany({
+      where: { userId, startTime: { gte: ninetyDaysAgo } },
+      orderBy: { startTime: 'asc' },
     }),
   ]);
 
@@ -61,6 +82,29 @@ export default async function ProgressPage() {
     weightKg: m.weightKg,
   }));
 
+  // Device health data shapes
+  const activityData = activity.map((a) => ({
+    date:            a.date.toISOString().split('T')[0],
+    steps:           a.steps,
+    activeCalories:  a.activeCalories,
+    exerciseMinutes: a.exerciseMinutes,
+  }));
+  const vitalsData = vitals.map((v) => ({
+    date:      v.date.toISOString().split('T')[0],
+    restingHR: v.restingHR,
+    hrvMs:     v.hrvMs,
+    spo2Pct:   v.spo2Pct,
+    vo2MaxMl:  v.vo2MaxMl,
+  }));
+  const sleepData = sleep.map((s) => ({
+    startTime:   s.startTime.toISOString().split('T')[0],
+    durationHrs: s.durationHrs,
+  }));
+  const deviceWorkoutData = deviceWorkouts.map((w) => ({
+    activityType: w.activityType,
+    durationMin:  w.durationMin,
+  }));
+
   const totalWorkouts = sessions.length;
   const totalVolumeKg = volumeData.reduce((s, d) => s + d.volume, 0);
   const latestWeight  = metrics.at(-1)?.weightKg ?? null;
@@ -71,12 +115,15 @@ export default async function ProgressPage() {
     <div className="max-w-4xl mx-auto px-4 py-6">
       <div className="flex items-center justify-between mb-6">
         <h1 className="text-2xl font-bold text-white">Progress</h1>
-        <Link
-          href="/chat"
-          className="text-sm text-indigo-400 hover:text-indigo-300"
-        >
-          Discuss with Coach →
-        </Link>
+        <div className="flex items-center gap-3">
+          <LogMeasurementButton />
+          <Link
+            href="/chat"
+            className="text-sm text-indigo-400 hover:text-indigo-300"
+          >
+            Discuss with Coach →
+          </Link>
+        </div>
       </div>
 
       {/* Summary stats */}
@@ -135,6 +182,54 @@ export default async function ProgressPage() {
             <StrengthChart prs={prList} />
           </CardContent>
         </Card>
+
+        {/* Device health: activity */}
+        {activityData.length > 0 && (
+          <Card>
+            <CardHeader>
+              <CardTitle>Activity</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <ActivityChart data={activityData} />
+            </CardContent>
+          </Card>
+        )}
+
+        {/* Device health: vitals */}
+        {vitalsData.length > 0 && (
+          <Card>
+            <CardHeader>
+              <CardTitle>Vitals</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <VitalsChart data={vitalsData} />
+            </CardContent>
+          </Card>
+        )}
+
+        {/* Device health: sleep */}
+        {sleepData.length > 0 && (
+          <Card>
+            <CardHeader>
+              <CardTitle>Sleep</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <SleepChart data={sleepData} />
+            </CardContent>
+          </Card>
+        )}
+
+        {/* Device health: device workouts */}
+        {deviceWorkoutData.length > 0 && (
+          <Card>
+            <CardHeader>
+              <CardTitle>Device Workouts</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <DeviceWorkoutsChart data={deviceWorkoutData} />
+            </CardContent>
+          </Card>
+        )}
       </div>
     </div>
   );
