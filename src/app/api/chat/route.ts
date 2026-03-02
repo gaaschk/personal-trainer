@@ -32,14 +32,17 @@ export async function POST(req: NextRequest) {
   if (auth instanceof NextResponse) return auth;
   const { userId } = auth;
 
-  const body = await req.json() as {
+  const rawText = await req.text();
+  console.error('[chat] content-type:', req.headers.get('content-type'));
+  console.error('[chat] raw body:', rawText);
+  const body = JSON.parse(rawText || '{}') as {
     message: string;
     conversationId?: string;
     attachmentIds?: string[];       // text/PDF attachment IDs
     imageAttachmentIds?: string[];  // image attachment IDs
   };
 
-  console.error('[chat] body:', JSON.stringify({ message: body.message, attachmentIds: body.attachmentIds, imageAttachmentIds: body.imageAttachmentIds }));
+  console.error('[chat] parsed body:', JSON.stringify({ message: body.message, attachmentIds: body.attachmentIds, imageAttachmentIds: body.imageAttachmentIds }));
   if (!body.message?.trim() && !body.attachmentIds?.length && !body.imageAttachmentIds?.length) {
     return NextResponse.json({ error: 'message required' }, { status: 400 });
   }
