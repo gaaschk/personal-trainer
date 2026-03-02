@@ -13,6 +13,9 @@ npm ci --include=dev
 echo "Running database migrations..."
 npx prisma migrate deploy
 
+echo "Stopping PM2 to free memory for build..."
+pm2 stop trainer 2>/dev/null || true
+
 echo "Building application..."
 NODE_ENV=production npm run build
 
