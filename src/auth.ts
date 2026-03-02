@@ -41,10 +41,14 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
     Google({
       clientId:     process.env.GOOGLE_CLIENT_ID,
       clientSecret: process.env.GOOGLE_CLIENT_SECRET,
+      // If a user with the same email already exists (credentials account),
+      // link the Google account to it rather than creating a duplicate user.
+      allowDangerousEmailAccountLinking: true,
     }),
     Apple({
       clientId:     process.env.APPLE_ID,
       clientSecret: process.env.APPLE_SECRET,
+      allowDangerousEmailAccountLinking: true,
     }),
   ],
 });

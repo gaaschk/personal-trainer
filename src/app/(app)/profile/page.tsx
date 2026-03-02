@@ -6,6 +6,7 @@ import ProfileForm from '@/components/profile/ProfileForm';
 import InjuryTags from '@/components/profile/InjuryTags';
 import GoalEditor from '@/components/profile/GoalEditor';
 import EquipmentPicker from '@/components/profile/EquipmentPicker';
+import ConnectedAccounts from '@/components/profile/ConnectedAccounts';
 import Spinner from '@/components/ui/Spinner';
 
 interface FullProfile {
@@ -126,6 +127,15 @@ export default function ProfilePage() {
               gyms={profile!.gymMemberships}
               onUpdate={loadProfile}
             />
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <CardTitle>Connected Accounts</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <ConnectedAccounts />
           </CardContent>
         </Card>
       </div>
