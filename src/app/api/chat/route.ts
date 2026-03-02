@@ -35,11 +35,15 @@ export async function POST(req: NextRequest) {
   const raw = JSON.parse(await req.text() || '{}') as Record<string, unknown>;
 
   // Support legacy format: { messages: [{ role, content }] }
+  // The legacy client sends full conversation history in each request.
+  type LegacyMsg = { role: string; content: string };
+  const legacyMessages = Array.isArray(raw.messages)
+    ? (raw.messages as LegacyMsg[])
+    : undefined;
+
   let message: string = (raw.message as string) ?? '';
-  if (!message && Array.isArray(raw.messages)) {
-    const last = (raw.messages as { role: string; content: string }[])
-      .filter((m) => m.role === 'user').at(-1);
-    message = last?.content ?? '';
+  if (!message && legacyMessages) {
+    message = legacyMessages.filter((m) => m.role === 'user').at(-1)?.content ?? '';
   }
 
   const body = {
@@ -121,10 +125,23 @@ export async function POST(req: NextRequest) {
         }
 
         // ── 5. Build sliding-window context + system prompt ───────────────────
-        const [baseSystem, { messages, systemSuffix }] = await Promise.all([
-          buildSystemPrompt(userId),
-          buildClaudeContext(conversationId, newUserContent),
-        ]);
+        let claudeMessages: Anthropic.MessageParam[];
+        let systemSuffix = '';
+        const baseSystem = await buildSystemPrompt(userId);
+
+        if (legacyMessages && legacyMessages.length > 0) {
+          // Legacy format: full history supplied by client — use it directly
+          claudeMessages = legacyMessages
+            .filter((m) => m.role === 'user' || m.role === 'assistant')
+            .map((m) => ({ role: m.role as 'user' | 'assistant', content: m.content }));
+          // Ensure the last message is from the user (it should already be)
+          if (claudeMessages.at(-1)?.role !== 'user') {
+            claudeMessages.push({ role: 'user', content: newUserContent });
+          }
+        } else {
+          ({ messages: claudeMessages, systemSuffix } = await buildClaudeContext(conversationId, newUserContent));
+        }
+
         const system = baseSystem + systemSuffix;
 
         // ── 6. Tool loop ──────────────────────────────────────────────────────
@@ -140,7 +157,7 @@ export async function POST(req: NextRequest) {
             max_tokens: 4096,
             system,
             tools,
-            messages,
+            messages: claudeMessages,
           });
 
           if (response.stop_reason === 'end_turn') {
@@ -232,8 +249,8 @@ export async function POST(req: NextRequest) {
               });
             }
 
-            messages.push({ role: 'assistant', content: response.content });
-            messages.push({ role: 'user',      content: toolResults });
+            claudeMessages.push({ role: 'assistant', content: response.content });
+            claudeMessages.push({ role: 'user',      content: toolResults });
           }
         }
 
