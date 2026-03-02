@@ -60,9 +60,10 @@ export default function ChatInterface({ conversationId: initialConversationId, i
   const [uploadError, setUploadError]   = useState('');
   const [conversationId, setConversationId] = useState(initialConversationId);
 
-  const bottomRef    = useRef<HTMLDivElement>(null);
-  const inputRef     = useRef<HTMLTextAreaElement>(null);
-  const fileInputRef = useRef<HTMLInputElement>(null);
+  const bottomRef       = useRef<HTMLDivElement>(null);
+  const inputRef        = useRef<HTMLTextAreaElement>(null);
+  const fileInputRef    = useRef<HTMLInputElement>(null);
+  const abortRef        = useRef<AbortController | null>(null);
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -132,10 +133,14 @@ export default function ChatInterface({ conversationId: initialConversationId, i
     const assistantMsg: Message = { role: 'assistant', content: '', statuses: [], streamingAt: streamStart };
     setMessages((prev) => [...prev, assistantMsg]);
 
+    const controller = new AbortController();
+    abortRef.current = controller;
+
     try {
       const res = await fetch('/api/chat', {
         method:  'POST',
         headers: { 'Content-Type': 'application/json' },
+        signal:  controller.signal,
         body: JSON.stringify({
           message:            text,
           conversationId,
@@ -217,7 +222,20 @@ export default function ChatInterface({ conversationId: initialConversationId, i
           } catch { /* ignore malformed */ }
         }
       }
+    } catch (err) {
+      // AbortError = user clicked Stop — keep whatever partial content arrived
+      if ((err as Error).name !== 'AbortError') {
+        setMessages((prev) => {
+          const copy = [...prev];
+          const last = { ...copy[copy.length - 1] };
+          const msg  = err instanceof Error ? err.message : 'Connection error';
+          last.content = (last.content || '') + `<p style="color:#f87171">${msg}</p>`;
+          copy[copy.length - 1] = last;
+          return copy;
+        });
+      }
     } finally {
+      abortRef.current = null;
       const endTime = Date.now();
       setStreaming(false);
       setMessages((prev) => {
@@ -235,6 +253,10 @@ export default function ChatInterface({ conversationId: initialConversationId, i
       });
     }
   }, [input, attachments, messages, streaming, conversationId]);
+
+  function handleCancel() {
+    abortRef.current?.abort();
+  }
 
   function handleKeyDown(e: React.KeyboardEvent<HTMLTextAreaElement>) {
     if (e.key === 'Enter' && !e.shiftKey) {
@@ -361,19 +383,28 @@ export default function ChatInterface({ conversationId: initialConversationId, i
             disabled={streaming}
           />
 
-          <button
-            onClick={send}
-            disabled={!canSend}
-            className="w-8 h-8 flex items-center justify-center rounded-lg bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors flex-shrink-0"
-          >
-            {streaming ? (
-              <Spinner className="w-4 h-4" />
-            ) : (
+          {streaming ? (
+            <button
+              onClick={handleCancel}
+              title="Stop response"
+              className="w-8 h-8 flex items-center justify-center rounded-lg bg-red-600 hover:bg-red-700 transition-colors flex-shrink-0"
+            >
+              {/* Stop square */}
+              <svg className="w-3.5 h-3.5 text-white" fill="currentColor" viewBox="0 0 24 24">
+                <rect x="5" y="5" width="14" height="14" rx="2" />
+              </svg>
+            </button>
+          ) : (
+            <button
+              onClick={send}
+              disabled={!canSend}
+              className="w-8 h-8 flex items-center justify-center rounded-lg bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors flex-shrink-0"
+            >
               <svg className="w-4 h-4 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" />
               </svg>
-            )}
-          </button>
+            </button>
+          )}
         </div>
 
         <p className="text-xs text-gray-600 mt-1.5 text-center">
