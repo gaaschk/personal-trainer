@@ -26,6 +26,47 @@ function encode(obj: object) {
   return new TextEncoder().encode(JSON.stringify(obj) + '\n');
 }
 
+// ── Legacy PDF injection ───────────────────────────────────────────────────────
+// When old browser JS sends { messages:[...] }, PDFs appear as text markers like
+// [Attached PDF: "name" — N pages]. For the last user message we look up the
+// rawBase64 from the DB and inject a native document block so Claude can OCR it.
+async function buildLegacyContentBlocks(
+  userId: string,
+  text: string,
+): Promise<Anthropic.ContentBlockParam[]> {
+  const blocks: Anthropic.ContentBlockParam[] = [];
+  const pdfPattern = /\[Attached PDF: "([^"]+)"(?:[^\]]+)?\]/g;
+  const seen = new Set<string>();
+  let match: RegExpExecArray | null;
+
+  while ((match = pdfPattern.exec(text)) !== null) {
+    const filename = match[1];
+    if (seen.has(filename)) continue;
+    seen.add(filename);
+
+    const att = await prisma.fileAttachment.findFirst({
+      where:   { userId, name: filename },
+      orderBy: { createdAt: 'desc' },
+      select:  { rawBase64: true },
+    });
+
+    if (att?.rawBase64) {
+      blocks.push({
+        type: 'document' as const,
+        source: {
+          type:       'base64' as const,
+          media_type: 'application/pdf' as const,
+          data:       att.rawBase64,
+        },
+        title: filename,
+      } as Anthropic.ContentBlockParam);
+    }
+  }
+
+  blocks.push({ type: 'text', text });
+  return blocks;
+}
+
 // ── Main handler ──────────────────────────────────────────────────────────────
 export async function POST(req: NextRequest) {
   const auth = await requireAuth();
@@ -161,6 +202,14 @@ export async function POST(req: NextRequest) {
           // Ensure the last message is from the user (it should already be)
           if (claudeMessages.at(-1)?.role !== 'user') {
             claudeMessages.push({ role: 'user', content: newUserContent });
+          } else {
+            // Inject native document blocks for any [Attached PDF: "name"] markers
+            // in the last user message so Claude can OCR image-based PDFs.
+            const lastIdx = claudeMessages.length - 1;
+            claudeMessages[lastIdx] = {
+              role:    'user',
+              content: await buildLegacyContentBlocks(userId, claudeMessages[lastIdx].content as string),
+            };
           }
         } else {
           ({ messages: claudeMessages, systemSuffix } = await buildClaudeContext(conversationId, newUserContent));

@@ -101,6 +101,9 @@ export async function POST(req: NextRequest) {
       kind:     attachment.kind,
       pages:    attachment.pages ?? undefined,
       mimeType: attachment.mimeType ?? undefined,
+      // Return extracted text for pdf/text so legacy clients can embed it in messages.
+      // Images are omitted here (content is raw base64 — too large to re-send).
+      ...(category !== 'image' && content ? { content } : {}),
     });
   } catch (err) {
     console.error('[upload] processing error', err);
