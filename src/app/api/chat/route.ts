@@ -39,6 +39,7 @@ export async function POST(req: NextRequest) {
     imageAttachmentIds?: string[];  // image attachment IDs
   };
 
+  console.error('[chat] body:', JSON.stringify({ message: body.message, attachmentIds: body.attachmentIds, imageAttachmentIds: body.imageAttachmentIds }));
   if (!body.message?.trim() && !body.attachmentIds?.length && !body.imageAttachmentIds?.length) {
     return NextResponse.json({ error: 'message required' }, { status: 400 });
   }
