@@ -105,12 +105,17 @@ export default function MessageBubble({ message }: { message: Message }) {
             className="ai-content text-sm text-gray-200 leading-relaxed"
             dangerouslySetInnerHTML={{ __html: message.content }}
           />
-        ) : message.statuses && message.statuses.length > 0 ? null : (
+        ) : message.statuses && message.statuses.length > 0 ? null
+          : message.streamingAt ? (
+          // Actively streaming this session → bouncing dots
           <div className="flex items-center gap-1">
             <div className="w-1.5 h-1.5 rounded-full bg-gray-500 animate-bounce" style={{ animationDelay: '0ms' }} />
             <div className="w-1.5 h-1.5 rounded-full bg-gray-500 animate-bounce" style={{ animationDelay: '150ms' }} />
             <div className="w-1.5 h-1.5 rounded-full bg-gray-500 animate-bounce" style={{ animationDelay: '300ms' }} />
           </div>
+        ) : (
+          // Empty message loaded from DB — response was interrupted before it could be saved
+          <p className="text-xs text-gray-600 italic">Response was interrupted.</p>
         )}
 
         {/* Rich card */}
