@@ -1,6 +1,9 @@
 import { prisma } from '@/lib/prisma';
 import { calculateBMI } from '@/lib/metrics';
 import { getDayFullName, formatDateShort } from '@/lib/utils';
+import { refreshWeatherCache } from '@/lib/ai/tool-handlers';
+
+const WEATHER_CACHE_TTL_MS = 24 * 60 * 60 * 1000; // 24 hours
 
 export async function buildSystemPrompt(userId: string): Promise<string> {
   const [user, profile, recentSessions, recentMetrics] = await Promise.all([
@@ -41,6 +44,35 @@ export async function buildSystemPrompt(userId: string): Promise<string> {
       take: 7,
     }),
   ]);
+
+  // ── Weather: serve from cache; refresh if stale ───────────────────────────
+  let weatherSection = '';
+  try {
+    let cache = await prisma.weatherCache.findUnique({ where: { userId } });
+    const stale = !cache || (Date.now() - cache.fetchedAt.getTime()) > WEATHER_CACHE_TTL_MS;
+    if (stale) {
+      // Refresh in the background — don't block the response on a slow API call
+      refreshWeatherCache(userId).then(async () => {
+        // After refresh completes the next request will see the updated cache
+      }).catch(() => { /* non-fatal */ });
+      // If we have a stale cache, still use it rather than showing nothing
+    }
+    if (cache) {
+      type WeatherData = {
+        location: string;
+        current: { conditions: string; temperatureC: number; feelsLikeC: number; humidity: number; precipMm: number; windKph: number; gustsKph: number };
+        forecast: { date: string; conditions: string; highC: number; lowC: number; precipMm: number; precipProbability: number; maxWindKph: number }[];
+      };
+      const w = JSON.parse(cache.data) as WeatherData;
+      const ageHours = Math.round((Date.now() - cache.fetchedAt.getTime()) / 3_600_000);
+      weatherSection = `\n## Weather — ${w.location} (updated ${ageHours}h ago)\n`;
+      weatherSection += `Now: ${w.current.conditions}, ${w.current.temperatureC}°C, feels like ${w.current.feelsLikeC}°C, humidity ${w.current.humidity}%, wind ${w.current.windKph} km/h\n`;
+      weatherSection += `7-Day Forecast:\n`;
+      for (const day of w.forecast) {
+        weatherSection += `  ${day.date}: ${day.conditions}, ${day.highC}°C / ${day.lowC}°C, precip ${day.precipMm}mm (${day.precipProbability}%), wind ${day.maxWindKph} km/h\n`;
+      }
+    }
+  } catch { /* non-fatal — weather section just omitted */ }
 
   const name = user?.name?.split(' ')[0] ?? user?.email ?? 'Client';
   const p = profile;
@@ -151,7 +183,7 @@ export async function buildSystemPrompt(userId: string): Promise<string> {
 
 Today's date: ${today}
 
-${profileSection}${injuriesSection}${goalsSection}${equipmentSection}${planSection}${historySection}
+${profileSection}${injuriesSection}${goalsSection}${equipmentSection}${planSection}${historySection}${weatherSection}
 ## Instructions
 - Only program exercises using available equipment — never suggest equipment not listed
 - Always account for all injuries/limitations in every recommendation
@@ -159,9 +191,8 @@ ${profileSection}${injuriesSection}${goalsSection}${equipmentSection}${planSecti
 - Format your responses as HTML — use <p>, <ul>, <li>, <strong>, <h3> with Tailwind classes
 - When presenting workout plans or schedules, use clear structured HTML tables or lists
 - Use tools to actually make changes (update profile, generate plans, log workouts) — never just describe changes
-- Call get_weather at most once per response, only when the user is actively planning an outdoor workout or asking about conditions — do not call it speculatively or multiple times
-- The weather forecast covers 7 days ahead; use it for near-term planning only
-- If the client's location is not set and weather is relevant, ask for it and use update_profile to save it
+- Weather data is pre-loaded in your context above (updated once per day) — use it directly for outdoor/weather planning without calling get_weather; only call get_weather if the user explicitly asks to refresh the forecast
+- If the client's location is not set, ask for it and use update_profile to save it
 - Be warm, encouraging, and specific — like a real personal trainer who knows this client well
 - If you don't have enough information about the client's profile, ask before generating a plan`;
 }

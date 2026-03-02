@@ -32,6 +32,7 @@ model User {
   bodyMetrics      BodyMetric[]
   conversations    Conversation[]
   fileAttachments  FileAttachment[]
+  weatherCache     WeatherCache?
 
   @@map("users")
 }
@@ -357,6 +358,20 @@ enum MessageRole {
   USER
   ASSISTANT
   TOOL
+}
+
+// ── Weather Cache ─────────────────────────────────────────────────────────────
+
+model WeatherCache {
+  id           String   @id @default(cuid())
+  userId       String   @unique @map("user_id")
+  fetchedAt    DateTime @map("fetched_at")
+  locationName String?  @map("location_name")
+  data         String   // JSON: { current: {...}, forecast: [...] }
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("weather_cache")
 }
 
 // ── Admin / Settings ──────────────────────────────────────────────────────────

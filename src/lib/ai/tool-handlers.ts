@@ -355,10 +355,88 @@ function wmoDescription(code: number): string {
 }
 
 // ── get_weather ───────────────────────────────────────────────────────────────
-export async function handleGetWeather(userId: string) {
+
+const WEATHER_CACHE_TTL_MS = 24 * 60 * 60 * 1000; // 24 hours
+
+// Fetch fresh forecast from Open-Meteo and upsert into WeatherCache.
+// Exported so system-prompt.ts can also refresh on first load.
+export async function refreshWeatherCache(userId: string): Promise<object | null> {
   const profile = await prisma.healthProfile.findUnique({
     where: { userId },
     select: { locationName: true, latitude: true, longitude: true },
+  });
+  if (!profile?.latitude || !profile?.longitude) return null;
+
+  const { latitude: lat, longitude: lon, locationName } = profile;
+  const url = [
+    'https://api.open-meteo.com/v1/forecast',
+    `?latitude=${lat}&longitude=${lon}`,
+    '&current=temperature_2m,apparent_temperature,relative_humidity_2m,precipitation,weather_code,wind_speed_10m,wind_gusts_10m',
+    '&daily=weather_code,temperature_2m_max,temperature_2m_min,precipitation_sum,precipitation_probability_max,wind_speed_10m_max',
+    '&timezone=auto',
+    '&forecast_days=7',
+  ].join('');
+
+  const res  = await fetch(url);
+  const data = await res.json() as {
+    current: {
+      temperature_2m: number;
+      apparent_temperature: number;
+      relative_humidity_2m: number;
+      precipitation: number;
+      weather_code: number;
+      wind_speed_10m: number;
+      wind_gusts_10m: number;
+    };
+    daily: {
+      time: string[];
+      weather_code: number[];
+      temperature_2m_max: number[];
+      temperature_2m_min: number[];
+      precipitation_sum: number[];
+      precipitation_probability_max: number[];
+      wind_speed_10m_max: number[];
+    };
+  };
+
+  const c = data.current;
+  const d = data.daily;
+
+  const result = {
+    location: locationName ?? `${lat}, ${lon}`,
+    current: {
+      conditions:   wmoDescription(c.weather_code),
+      temperatureC: Math.round(c.temperature_2m),
+      feelsLikeC:   Math.round(c.apparent_temperature),
+      humidity:     c.relative_humidity_2m,
+      precipMm:     c.precipitation,
+      windKph:      Math.round(c.wind_speed_10m),
+      gustsKph:     Math.round(c.wind_gusts_10m),
+    },
+    forecast: d.time.map((date, i) => ({
+      date,
+      conditions:        wmoDescription(d.weather_code[i]),
+      highC:             Math.round(d.temperature_2m_max[i]),
+      lowC:              Math.round(d.temperature_2m_min[i]),
+      precipMm:          Math.round(d.precipitation_sum[i] * 10) / 10,
+      precipProbability: d.precipitation_probability_max[i],
+      maxWindKph:        Math.round(d.wind_speed_10m_max[i]),
+    })),
+  };
+
+  await prisma.weatherCache.upsert({
+    where:  { userId },
+    create: { userId, fetchedAt: new Date(), locationName: locationName ?? null, data: JSON.stringify(result) },
+    update: { fetchedAt: new Date(), locationName: locationName ?? null, data: JSON.stringify(result) },
+  });
+
+  return result;
+}
+
+export async function handleGetWeather(userId: string) {
+  const profile = await prisma.healthProfile.findUnique({
+    where: { userId },
+    select: { latitude: true, longitude: true },
   });
 
   if (!profile?.latitude || !profile?.longitude) {
@@ -368,62 +446,16 @@ export async function handleGetWeather(userId: string) {
   }
 
   try {
-    const { latitude: lat, longitude: lon, locationName } = profile;
-    const url = [
-      'https://api.open-meteo.com/v1/forecast',
-      `?latitude=${lat}&longitude=${lon}`,
-      '&current=temperature_2m,apparent_temperature,relative_humidity_2m,precipitation,weather_code,wind_speed_10m,wind_gusts_10m',
-      '&daily=weather_code,temperature_2m_max,temperature_2m_min,precipitation_sum,precipitation_probability_max,wind_speed_10m_max',
-      '&timezone=auto',
-      '&forecast_days=7',
-    ].join('');
+    // Return cached data if it was fetched today; otherwise refresh.
+    const cache = await prisma.weatherCache.findUnique({ where: { userId } });
+    const stale = !cache || (Date.now() - cache.fetchedAt.getTime()) > WEATHER_CACHE_TTL_MS;
 
-    const res  = await fetch(url);
-    const data = await res.json() as {
-      current: {
-        temperature_2m: number;
-        apparent_temperature: number;
-        relative_humidity_2m: number;
-        precipitation: number;
-        weather_code: number;
-        wind_speed_10m: number;
-        wind_gusts_10m: number;
-      };
-      daily: {
-        time: string[];
-        weather_code: number[];
-        temperature_2m_max: number[];
-        temperature_2m_min: number[];
-        precipitation_sum: number[];
-        precipitation_probability_max: number[];
-        wind_speed_10m_max: number[];
-      };
-    };
+    if (!stale && cache) {
+      return { ...JSON.parse(cache.data), cached: true, fetchedAt: cache.fetchedAt };
+    }
 
-    const c = data.current;
-    const d = data.daily;
-
-    return {
-      location: locationName ?? `${lat}, ${lon}`,
-      current: {
-        conditions:   wmoDescription(c.weather_code),
-        temperatureC: Math.round(c.temperature_2m),
-        feelsLikeC:   Math.round(c.apparent_temperature),
-        humidity:     c.relative_humidity_2m,
-        precipMm:     c.precipitation,
-        windKph:      Math.round(c.wind_speed_10m),
-        gustsKph:     Math.round(c.wind_gusts_10m),
-      },
-      forecast: d.time.map((date, i) => ({
-        date,
-        conditions:        wmoDescription(d.weather_code[i]),
-        highC:             Math.round(d.temperature_2m_max[i]),
-        lowC:              Math.round(d.temperature_2m_min[i]),
-        precipMm:          Math.round(d.precipitation_sum[i] * 10) / 10,
-        precipProbability: d.precipitation_probability_max[i],
-        maxWindKph:        Math.round(d.wind_speed_10m_max[i]),
-      })),
-    };
+    const fresh = await refreshWeatherCache(userId);
+    return fresh ?? { error: 'Weather unavailable — no location configured.' };
   } catch (err) {
     return { error: `Weather fetch failed: ${err instanceof Error ? err.message : 'unknown error'}` };
   }
