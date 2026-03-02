@@ -1,8 +1,34 @@
+import { redirect } from 'next/navigation';
+import { auth } from '@/auth';
+import { prisma } from '@/lib/prisma';
 import ChatInterface from '@/components/chat/ChatInterface';
 
 export const metadata = { title: 'AI Coach — AI Trainer' };
 
-export default function ChatPage() {
+export default async function ChatPage() {
+  const session = await auth();
+  if (!session?.user?.id) redirect('/login');
+  const userId = session.user.id;
+
+  // Load the most recent conversation + its messages so Coach has full context
+  const recentConversation = await prisma.conversation.findFirst({
+    where:   { userId },
+    orderBy: { updatedAt: 'desc' },
+    include: {
+      messages: {
+        where:   { role: { in: ['USER', 'ASSISTANT'] } },
+        orderBy: { createdAt: 'asc' },
+        take:    60, // last 60 messages is plenty for context display
+      },
+    },
+  });
+
+  const initialMessages = recentConversation?.messages.map((m) => ({
+    role:    m.role === 'USER' ? ('user' as const) : ('assistant' as const),
+    // Use displayContent when available (strips embedded PDF/file text)
+    content: (m.displayContent ?? m.content) || '',
+  })) ?? [];
+
   return (
     <div className="h-screen flex flex-col">
       <div className="px-4 py-3 border-b border-gray-800 flex items-center gap-2">
@@ -17,7 +43,10 @@ export default function ChatPage() {
         </div>
       </div>
       <div className="flex-1 overflow-hidden">
-        <ChatInterface />
+        <ChatInterface
+          conversationId={recentConversation?.id}
+          initialMessages={initialMessages}
+        />
       </div>
     </div>
   );
