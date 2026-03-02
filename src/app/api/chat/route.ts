@@ -92,37 +92,61 @@ export async function POST(req: NextRequest) {
             })
           : [];
 
-        // ── 3. Build full user content (embed text attachments) ───────────────
+        // ── 3. Build display text and fallback text content ───────────────────
+        const allAttachments = [...textAttachments, ...imageAttachments];
         const displayText = body.message || (
-          (textAttachments.length + imageAttachments.length) === 1
-            ? `Please review the attached ${[...textAttachments, ...imageAttachments][0].kind === 'pdf' ? 'document' : 'file'}: ${[...textAttachments, ...imageAttachments][0].name}`
-            : `Please review the ${textAttachments.length + imageAttachments.length} attached files.`
+          allAttachments.length === 1
+            ? `Please review the attached ${allAttachments[0].kind === 'pdf' ? 'document' : 'file'}: ${allAttachments[0].name}`
+            : `Please review the ${allAttachments.length} attached files.`
         );
 
+        // Text-only fallback content (for DB storage — no raw bytes)
         let fullContent = displayText;
         for (const att of textAttachments) {
-          const label = att.kind === 'pdf'
-            ? `[Attached PDF: "${att.name}"${att.pages ? ` — ${att.pages} pages` : ''}]`
-            : `[Attached file: "${att.name}"]`;
-          fullContent = `${label}\n\`\`\`\n${att.content}\n\`\`\`\n\n${fullContent}`;
+          if (!att.rawBase64 && att.content) {
+            // Old record without rawBase64: embed extracted text as before
+            const label = att.kind === 'pdf'
+              ? `[Attached PDF: "${att.name}"${att.pages ? ` — ${att.pages} pages` : ''}]`
+              : `[Attached file: "${att.name}"]`;
+            fullContent = `${label}\n\`\`\`\n${att.content}\n\`\`\`\n\n${fullContent}`;
+          }
         }
 
-        // ── 4. Build new user content block (images become vision blocks) ─────
-        let newUserContent: string | Anthropic.ContentBlockParam[];
-        if (imageAttachments.length > 0) {
-          const contentBlocks: Anthropic.ContentBlockParam[] = imageAttachments.map((img) => ({
+        // ── 4. Build content blocks — native document/vision blocks when possible
+        const contentBlocks: Anthropic.ContentBlockParam[] = [];
+
+        // PDFs with rawBase64 → native document block (handles image-based PDFs)
+        for (const att of textAttachments) {
+          if (att.rawBase64) {
+            contentBlocks.push({
+              type: 'document' as const,
+              source: {
+                type:       'base64' as const,
+                media_type: 'application/pdf' as const,
+                data:       att.rawBase64,
+              },
+                title: att.name,
+            } as Anthropic.ContentBlockParam);
+          }
+        }
+
+        // Images → vision blocks
+        for (const img of imageAttachments) {
+          const data = img.rawBase64 ?? img.content;
+          contentBlocks.push({
             type: 'image' as const,
             source: {
               type:       'base64' as const,
               media_type: (img.mimeType ?? 'image/jpeg') as 'image/jpeg' | 'image/png' | 'image/gif' | 'image/webp',
-              data:       img.content,
+              data,
             },
-          }));
-          contentBlocks.push({ type: 'text', text: fullContent });
-          newUserContent = contentBlocks;
-        } else {
-          newUserContent = fullContent;
+          });
         }
+
+        // Always append the text message last
+        contentBlocks.push({ type: 'text', text: fullContent });
+
+        const newUserContent: Anthropic.ContentBlockParam[] = contentBlocks;
 
         // ── 5. Build sliding-window context + system prompt ───────────────────
         let claudeMessages: Anthropic.MessageParam[];

@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { requireAuth } from '@/lib/auth';
+import { prisma } from '@/lib/prisma';
 
 export const dynamic = 'force-dynamic';
 
@@ -20,6 +21,7 @@ const SUPPORTED_TYPES: Record<string, 'pdf' | 'image' | 'text'> = {
 export async function POST(req: NextRequest) {
   const auth = await requireAuth();
   if (auth instanceof NextResponse) return auth;
+  const { userId } = auth;
 
   let formData: FormData;
   try {
@@ -46,43 +48,60 @@ export async function POST(req: NextRequest) {
 
   try {
     const buffer = Buffer.from(await file.arrayBuffer());
+    let content: string;
+    let rawBase64: string | undefined;
+    let pages: number | undefined;
+    const mimeType = category === 'image' ? file.type : undefined;
 
     if (category === 'pdf') {
-      // Use lib path to avoid pdf-parse v1's test-file auto-load in index.js
-      // eslint-disable-next-line @typescript-eslint/no-require-imports
-      const pdfParse = require('pdf-parse/lib/pdf-parse.js') as (
-        buf: Buffer,
-      ) => Promise<{ text: string; numpages: number }>;
-      const data = await pdfParse(buffer);
-      const text = data.text.trim();
-      const content = text.length > MAX_TEXT_CHARS
-        ? text.slice(0, MAX_TEXT_CHARS) + '\n\n[… document truncated …]'
-        : text;
+      // Store raw bytes for native Claude document blocks (handles image-based PDFs)
+      rawBase64 = buffer.toString('base64');
+      // Also extract text as fallback and for page-count detection
+      try {
+        // Use lib path to avoid pdf-parse v1's test-file auto-load in index.js
+        // eslint-disable-next-line @typescript-eslint/no-require-imports
+        const pdfParse = require('pdf-parse/lib/pdf-parse.js') as (
+          buf: Buffer,
+        ) => Promise<{ text: string; numpages: number }>;
+        const data = await pdfParse(buffer);
+        const text = data.text.trim();
+        content = text.length > MAX_TEXT_CHARS
+          ? text.slice(0, MAX_TEXT_CHARS) + '\n\n[… document truncated …]'
+          : text;
+        pages = data.numpages;
+      } catch {
+        content = ''; // image-only PDF — Claude will OCR via rawBase64
+      }
+    } else if (category === 'image') {
+      rawBase64 = buffer.toString('base64');
+      content = rawBase64; // kept for backwards compat
+    } else {
+      // text / csv / json
+      const raw = buffer.toString('utf-8');
+      content = raw.length > MAX_TEXT_CHARS
+        ? raw.slice(0, MAX_TEXT_CHARS) + '\n\n[… file truncated …]'
+        : raw;
+    }
 
-      return NextResponse.json({
-        name:  file.name,
-        kind:  'pdf',
+    const attachment = await prisma.fileAttachment.create({
+      data: {
+        userId,
+        name:      file.name,
+        kind:      category,
+        mimeType:  mimeType ?? null,
+        pages:     pages ?? null,
         content,
-        pages: data.numpages,
-      });
-    }
+        rawBase64: rawBase64 ?? null,
+      },
+    });
 
-    if (category === 'image') {
-      return NextResponse.json({
-        name:     file.name,
-        kind:     'image',
-        content:  buffer.toString('base64'),
-        mimeType: file.type,
-      });
-    }
-
-    // text / csv / json
-    const raw = buffer.toString('utf-8');
-    const content = raw.length > MAX_TEXT_CHARS
-      ? raw.slice(0, MAX_TEXT_CHARS) + '\n\n[… file truncated …]'
-      : raw;
-
-    return NextResponse.json({ name: file.name, kind: 'text', content });
+    return NextResponse.json({
+      id:       attachment.id,
+      name:     attachment.name,
+      kind:     attachment.kind,
+      pages:    attachment.pages ?? undefined,
+      mimeType: attachment.mimeType ?? undefined,
+    });
   } catch (err) {
     console.error('[upload] processing error', err);
     return NextResponse.json(

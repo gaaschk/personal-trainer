@@ -344,7 +344,8 @@ model FileAttachment {
   kind      String   // 'pdf' | 'image' | 'text'
   mimeType  String?  @map("mime_type")
   pages     Int?
-  content   String   // extracted text for pdf/text; base64 data URI for image
+  content   String   // extracted text for pdf/text; base64 for image
+  rawBase64 String?  @map("raw_base64") // raw file bytes as base64 — used for native PDF/image document blocks
   createdAt DateTime @default(now()) @map("created_at")
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
