@@ -32,17 +32,23 @@ export async function POST(req: NextRequest) {
   if (auth instanceof NextResponse) return auth;
   const { userId } = auth;
 
-  const rawText = await req.text();
-  console.error('[chat] content-type:', req.headers.get('content-type'));
-  console.error('[chat] raw body:', rawText);
-  const body = JSON.parse(rawText || '{}') as {
-    message: string;
-    conversationId?: string;
-    attachmentIds?: string[];       // text/PDF attachment IDs
-    imageAttachmentIds?: string[];  // image attachment IDs
+  const raw = JSON.parse(await req.text() || '{}') as Record<string, unknown>;
+
+  // Support legacy format: { messages: [{ role, content }] }
+  let message: string = (raw.message as string) ?? '';
+  if (!message && Array.isArray(raw.messages)) {
+    const last = (raw.messages as { role: string; content: string }[])
+      .filter((m) => m.role === 'user').at(-1);
+    message = last?.content ?? '';
+  }
+
+  const body = {
+    message,
+    conversationId: raw.conversationId as string | undefined,
+    attachmentIds:      Array.isArray(raw.attachmentIds)      ? (raw.attachmentIds as string[])      : undefined,
+    imageAttachmentIds: Array.isArray(raw.imageAttachmentIds) ? (raw.imageAttachmentIds as string[]) : undefined,
   };
 
-  console.error('[chat] parsed body:', JSON.stringify({ message: body.message, attachmentIds: body.attachmentIds, imageAttachmentIds: body.imageAttachmentIds }));
   if (!body.message?.trim() && !body.attachmentIds?.length && !body.imageAttachmentIds?.length) {
     return NextResponse.json({ error: 'message required' }, { status: 400 });
   }
