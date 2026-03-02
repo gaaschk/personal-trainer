@@ -9,6 +9,11 @@ datasource db {
 
 // ── Auth models (NextAuth conventions) ──────────────────────────────────────
 
+enum UserRole {
+  USER
+  ADMIN
+}
+
 model User {
   id            String    @id @default(cuid())
   name          String?
@@ -16,6 +21,7 @@ model User {
   emailVerified DateTime? @map("email_verified")
   image         String?
   password      String?
+  role          UserRole  @default(USER)
   createdAt     DateTime  @default(now()) @map("created_at")
   updatedAt     DateTime  @updatedAt @map("updated_at")
 
@@ -25,6 +31,7 @@ model User {
   workoutSessions  WorkoutSession[]
   bodyMetrics      BodyMetric[]
   conversations    Conversation[]
+  fileAttachments  FileAttachment[]
 
   @@map("users")
 }
@@ -300,11 +307,13 @@ model BodyMetric {
 }
 
 model Conversation {
-  id        String   @id @default(cuid())
-  userId    String   @map("user_id")
-  title     String?
-  createdAt DateTime @default(now()) @map("created_at")
-  updatedAt DateTime @updatedAt @map("updated_at")
+  id           String    @id @default(cuid())
+  userId       String    @map("user_id")
+  title        String?
+  summary      String?                      // Rolling summary of messages outside the window
+  summarizedAt DateTime? @map("summarized_at")
+  createdAt    DateTime  @default(now()) @map("created_at")
+  updatedAt    DateTime  @updatedAt @map("updated_at")
 
   user     User      @relation(fields: [userId], references: [id], onDelete: Cascade)
   messages Message[]
@@ -316,7 +325,10 @@ model Message {
   id             String      @id @default(cuid())
   conversationId String      @map("conversation_id")
   role           MessageRole
-  content        String
+  content        String      // Full content sent to Claude (includes embedded file text)
+  displayContent String?     @map("display_content") // What's shown in the UI
+  summarized     Boolean     @default(false)          // True once covered by conversation summary
+  summarizedAt   DateTime?   @map("summarized_at")
   metadata       String?
   createdAt      DateTime    @default(now()) @map("created_at")
 
@@ -325,8 +337,35 @@ model Message {
   @@map("messages")
 }
 
+model FileAttachment {
+  id        String   @id @default(cuid())
+  userId    String   @map("user_id")
+  name      String
+  kind      String   // 'pdf' | 'image' | 'text'
+  mimeType  String?  @map("mime_type")
+  pages     Int?
+  content   String   // extracted text for pdf/text; base64 data URI for image
+  createdAt DateTime @default(now()) @map("created_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("file_attachments")
+}
+
 enum MessageRole {
   USER
   ASSISTANT
   TOOL
+}
+
+// ── Admin / Settings ──────────────────────────────────────────────────────────
+
+model SystemSetting {
+  id        String   @id @default(cuid())
+  key       String   @unique
+  value     String   // AES-256-GCM encrypted for secret keys
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@map("system_settings")
 }

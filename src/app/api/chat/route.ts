@@ -1,9 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server';
 import Anthropic from '@anthropic-ai/sdk';
 import { requireAuth } from '@/lib/auth';
-import { anthropic } from '@/lib/ai/client';
+import { getAnthropicClient } from '@/lib/ai/client';
+import { getSetting } from '@/lib/settings';
 import { buildSystemPrompt } from '@/lib/ai/system-prompt';
 import { buildTrainerTools } from '@/lib/ai/tools';
+import { buildClaudeContext, maybeSummarize } from '@/lib/ai/context-manager';
 import {
   handleUpdateProfile,
   handleGenerateTrainingPlan,
@@ -30,26 +32,19 @@ export async function POST(req: NextRequest) {
   if (auth instanceof NextResponse) return auth;
   const { userId } = auth;
 
-  interface Attachment {
-    name: string;
-    kind: 'pdf' | 'text' | 'image';
-    content: string;     // text for pdf/text, base64 for image
-    mimeType?: string;   // for images
-    pages?: number;      // for pdfs
-  }
-
   const body = await req.json() as {
-    messages: { role: 'user' | 'assistant'; content: string }[];
-    attachments?: Attachment[];
+    message: string;
     conversationId?: string;
+    attachmentIds?: string[];       // text/PDF attachment IDs
+    imageAttachmentIds?: string[];  // image attachment IDs
   };
 
-  if (!body.messages?.length) {
-    return NextResponse.json({ error: 'messages required' }, { status: 400 });
+  if (!body.message?.trim() && !body.attachmentIds?.length && !body.imageAttachmentIds?.length) {
+    return NextResponse.json({ error: 'message required' }, { status: 400 });
   }
 
-  const model   = process.env.ANTHROPIC_MODEL ?? 'claude-sonnet-4-6';
-  const tools   = buildTrainerTools();
+  const model = (await getSetting('ANTHROPIC_MODEL')) ?? 'claude-sonnet-4-6';
+  const tools = buildTrainerTools();
 
   const stream = new ReadableStream({
     async start(controller) {
@@ -59,46 +54,78 @@ export async function POST(req: NextRequest) {
       }, 5000);
 
       try {
-        // Build system prompt fresh from DB
-        const system = await buildSystemPrompt(userId);
+        // ── 1. Load or create conversation ───────────────────────────────────
+        let conversationId = body.conversationId;
 
-        // Build base message list
-        const messages: Anthropic.MessageParam[] = body.messages.map((m) => ({
-          role:    m.role,
-          content: m.content,
-        }));
-
-        // Inject image attachments into the last user message as vision content blocks.
-        // PDF/text content is already embedded in the message content by the client.
-        if (body.attachments?.length) {
-          const lastIdx = messages.length - 1;
-          const last = messages[lastIdx];
-          if (last.role === 'user') {
-            const contentBlocks: Anthropic.ContentBlockParam[] = [];
-
-            for (const img of body.attachments) {
-              contentBlocks.push({
-                type: 'image',
-                source: {
-                  type:       'base64',
-                  media_type: (img.mimeType ?? 'image/jpeg') as 'image/jpeg' | 'image/png' | 'image/gif' | 'image/webp',
-                  data:       img.content,
-                },
-              });
-            }
-
-            contentBlocks.push({ type: 'text', text: last.content as string });
-            messages[lastIdx] = { role: 'user', content: contentBlocks };
-          }
+        if (!conversationId) {
+          const conv = await prisma.conversation.create({
+            data: { userId, title: body.message.slice(0, 80) },
+          });
+          conversationId = conv.id;
+          controller.enqueue(encode({ t: 'ci', v: conversationId }));
         }
 
+        // ── 2. Fetch attachment content by ID ────────────────────────────────
+        const textAttachments = body.attachmentIds?.length
+          ? await prisma.fileAttachment.findMany({
+              where: { id: { in: body.attachmentIds }, userId },
+            })
+          : [];
+
+        const imageAttachments = body.imageAttachmentIds?.length
+          ? await prisma.fileAttachment.findMany({
+              where: { id: { in: body.imageAttachmentIds }, userId },
+            })
+          : [];
+
+        // ── 3. Build full user content (embed text attachments) ───────────────
+        const displayText = body.message || (
+          (textAttachments.length + imageAttachments.length) === 1
+            ? `Please review the attached ${[...textAttachments, ...imageAttachments][0].kind === 'pdf' ? 'document' : 'file'}: ${[...textAttachments, ...imageAttachments][0].name}`
+            : `Please review the ${textAttachments.length + imageAttachments.length} attached files.`
+        );
+
+        let fullContent = displayText;
+        for (const att of textAttachments) {
+          const label = att.kind === 'pdf'
+            ? `[Attached PDF: "${att.name}"${att.pages ? ` — ${att.pages} pages` : ''}]`
+            : `[Attached file: "${att.name}"]`;
+          fullContent = `${label}\n\`\`\`\n${att.content}\n\`\`\`\n\n${fullContent}`;
+        }
+
+        // ── 4. Build new user content block (images become vision blocks) ─────
+        let newUserContent: string | Anthropic.ContentBlockParam[];
+        if (imageAttachments.length > 0) {
+          const contentBlocks: Anthropic.ContentBlockParam[] = imageAttachments.map((img) => ({
+            type: 'image' as const,
+            source: {
+              type:       'base64' as const,
+              media_type: (img.mimeType ?? 'image/jpeg') as 'image/jpeg' | 'image/png' | 'image/gif' | 'image/webp',
+              data:       img.content,
+            },
+          }));
+          contentBlocks.push({ type: 'text', text: fullContent });
+          newUserContent = contentBlocks;
+        } else {
+          newUserContent = fullContent;
+        }
+
+        // ── 5. Build sliding-window context + system prompt ───────────────────
+        const [baseSystem, { messages, systemSuffix }] = await Promise.all([
+          buildSystemPrompt(userId),
+          buildClaudeContext(conversationId, newUserContent),
+        ]);
+        const system = baseSystem + systemSuffix;
+
+        // ── 6. Tool loop ──────────────────────────────────────────────────────
         const MAX_ITERATIONS = 8;
         let iterations = 0;
+        let assistantText = '';
 
         while (iterations < MAX_ITERATIONS) {
           iterations++;
 
-          const response = await anthropic.messages.create({
+          const response = await (await getAnthropicClient()).messages.create({
             model,
             max_tokens: 4096,
             system,
@@ -107,11 +134,11 @@ export async function POST(req: NextRequest) {
           });
 
           if (response.stop_reason === 'end_turn') {
-            const text = response.content
+            assistantText = response.content
               .filter((b) => b.type === 'text')
               .map((b) => (b as { type: 'text'; text: string }).text)
               .join('');
-            controller.enqueue(encode({ t: 'd', v: text }));
+            controller.enqueue(encode({ t: 'd', v: assistantText }));
             break;
           }
 
@@ -124,7 +151,6 @@ export async function POST(req: NextRequest) {
             for (const tb of toolBlocks) {
               const input = tb.input as Record<string, unknown>;
 
-              // Emit status to client
               const statusMap: Record<string, string> = {
                 update_profile:          'Updating your profile…',
                 generate_training_plan:  'Generating training plan…',
@@ -145,7 +171,6 @@ export async function POST(req: NextRequest) {
 
                   case 'generate_training_plan': {
                     result = await handleGenerateTrainingPlan(userId, input as unknown as TrainingPlanInput);
-                    // Emit rich card for the new plan
                     if ((result as { success: boolean; planId?: string }).planId) {
                       const plan = await prisma.trainingPlan.findUnique({
                         where: { id: (result as { planId: string }).planId },
@@ -197,34 +222,36 @@ export async function POST(req: NextRequest) {
               });
             }
 
-            // Add assistant turn + tool results to message history
             messages.push({ role: 'assistant', content: response.content });
             messages.push({ role: 'user',      content: toolResults });
           }
         }
 
-        // Save conversation to DB if conversationId provided
-        if (body.conversationId) {
-          const lastUser    = body.messages.at(-1);
-          const allMessages = messages.filter((m) => typeof m.content === 'string');
-          const lastAssist  = allMessages.findLast((m) => m.role === 'assistant');
-          if (lastUser && lastAssist) {
-            await prisma.message.createMany({
-              data: [
-                {
-                  conversationId: body.conversationId,
-                  role:           'USER',
-                  content:        lastUser.content as string,
-                },
-                {
-                  conversationId: body.conversationId,
-                  role:           'ASSISTANT',
-                  content:        lastAssist.content as string,
-                },
-              ],
-            });
-          }
-        }
+        // ── 7. Save messages to DB ────────────────────────────────────────────
+        await prisma.message.createMany({
+          data: [
+            {
+              conversationId,
+              role:           'USER',
+              content:        fullContent,
+              displayContent: displayText !== fullContent ? displayText : null,
+            },
+            {
+              conversationId,
+              role:    'ASSISTANT',
+              content: assistantText,
+            },
+          ],
+        });
+
+        // Update conversation timestamp + conditionally summarize old messages
+        await prisma.conversation.update({
+          where: { id: conversationId },
+          data:  { updatedAt: new Date() },
+        });
+
+        // Non-fatal: summarization failure is logged but doesn't break the response
+        await maybeSummarize(conversationId);
 
         controller.enqueue(encode({ t: 'x' }));
       } catch (err) {
